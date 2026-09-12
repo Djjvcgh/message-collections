@@ -1,0 +1,39 @@
+# 福利词表：命中任一关键词即触发即时推送（匹配时忽略空白与大小写）
+welfare_keywords:
+  - 免费额度
+  - 限时免费
+  - 免费
+  - 白嫖
+  - 赠送
+  - 白送
+  - 送token
+  - 送额度
+  - 送会员
+  - 送一年
+  - 送三个月
+  - 福利
+  - 优惠
+  - 折扣
+  - 半价
+  - 学生
+  - 教育优惠
+  - 试用
+  - 领取
+  - 补贴
+  - free tier
+  - free
+  - credits
+  - promo
+  - discount
+  - student
+  - giveaway
+  - coupon
+  - trial
+  - half price
+
+# 排除词：标题命中即跳过（调优误报时改这里）
+exclude_words:
+  - 广告
+  - 广告位
+  - 推广
+  - sponsored

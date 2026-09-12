@@ -1,0 +1,9 @@
+# 数据源配置
+radar:
+  # AI News Radar 公开数据（原 learnprompt.github.io 已 301 到此域名）
+  latest_24h_url: https://news.learnprompt.pro/data/latest-24h.json
+  # 数据年龄超过该小时数视为上游故障，本轮跳过
+  max_age_hours: 36
+
+# 页面 diff 监控（M2 里程碑启用，留空即跳过）
+page_watch: []
