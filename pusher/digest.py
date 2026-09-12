@@ -38,14 +38,33 @@ def render_item(item):
 
 
 def render_digest(date_str, groups):
+    """按 福利→模型→产品→值得注意 的优先级渲染。
+
+    超过 Telegram 长度上限时按条目整体丢弃（不按字符硬切，
+    避免切断 <a> 标签导致 Telegram 400）。
+    """
     parts = [f"🤖 AI 日报 · {date_str}"]
+    length = len(parts[0])
+    truncated = False
     for key, label in GROUP_LABELS:
         items = groups.get(key)
         if not items:
             continue
-        parts.append(f"\n{label} ({len(items)})")
-        parts.extend(render_item(i) for i in items)
-    text = "\n".join(parts)
-    if len(text) > MAX_CHARS:
-        text = text[:MAX_CHARS] + "\n…（内容过长已截断）"
-    return text
+        header = f"{label} ({len(items)})"
+        if length + 1 + len(header) > MAX_CHARS:
+            truncated = True
+            break
+        parts.append(header)
+        length += 1 + len(header)
+        for item in items:
+            rendered = render_item(item)
+            if length + 1 + len(rendered) > MAX_CHARS:
+                truncated = True
+                break
+            parts.append(rendered)
+            length += 1 + len(rendered)
+        if truncated:
+            break
+    if truncated:
+        parts.append("…（内容过长已截断）")
+    return "\n".join(parts)

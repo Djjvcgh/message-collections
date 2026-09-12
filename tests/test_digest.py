@@ -61,3 +61,28 @@ def test_render_digest_contains_groups_and_links():
 
 def test_render_digest_empty():
     assert render_digest("09-12", {}) == "🤖 AI 日报 · 09-12"
+
+
+def test_render_digest_truncation_never_cuts_tags():
+    from pusher.digest import MAX_CHARS
+
+    def big_item(n):
+        return {
+            "title": f"很长的模型发布标题第{n}条" + "补充细节" * 30,
+            "title_en": "",
+            "source": "Source",
+            "tier": 1,
+            "tier_label": "AI垂直源",
+            "score": 0.9,
+            "label": "model_release",
+            "url": f"https://example.com/very/long/url/segment-{n}/more/segments",
+            "signals": [],
+            "reason": "",
+        }
+
+    groups = {"model_release": [big_item(n) for n in range(30)]}
+    text = render_digest("09-12", groups)
+    assert len(text) <= MAX_CHARS + 20
+    assert text.count("<a ") == text.count("</a>")  # 标签必须成对完整
+    assert text.count("<b>") == text.count("</b>")
+    assert text.endswith("…（内容过长已截断）")
