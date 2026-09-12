@@ -1,11 +1,16 @@
-"""日报组装：按组归类、排序、限额、渲染为 HTML 文本。"""
-from .notify_telegram import esc, link
+"""日报组装：按组归类、排序、限额、渲染为 HTML 文本。
+
+排版原则：组间空行、条目间空行、标题即链接（不堆 URL、不开预览）。
+"""
+import html
+
+from .notify_telegram import esc
 
 GROUP_LABELS = [
-    ("welfare", "🎁 福利速递"),
-    ("model_release", "🚀 模型发布"),
-    ("product", "🧰 产品与工具"),
-    ("notable", "💬 值得注意"),
+    ("welfare", "🎁", "福利速递"),
+    ("model_release", "🚀", "模型发布"),
+    ("product", "🧰", "产品与工具"),
+    ("notable", "💬", "值得注意"),
 ]
 
 PRODUCT_LABELS = ("ai_product_update", "developer_tool", "agent_workflow")
@@ -23,7 +28,7 @@ def classify(item, welfare_filter):
 
 
 def build_groups(items, welfare_filter, limits):
-    groups = {key: [] for key, _ in GROUP_LABELS}
+    groups = {key: [] for key, _, _ in GROUP_LABELS}
     for item in items:
         groups[classify(item, welfare_filter)].append(item)
     for key in groups:
@@ -33,8 +38,12 @@ def build_groups(items, welfare_filter, limits):
 
 
 def render_item(item):
+    title_link = (
+        f'<a href="{html.escape(item["url"] or "", quote=True)}">'
+        f"<b>{esc(item['title'])}</b></a>"
+    )
     src = item["source"] + (f" · {item['tier_label']}" if item["tier_label"] else "")
-    return f"· <b>{esc(item['title'])}</b>\n  {esc(src)}\n  {link(item['url'])}"
+    return f"• {title_link}\n　来源：{esc(src)}"
 
 
 def render_digest(date_str, groups):
@@ -43,28 +52,28 @@ def render_digest(date_str, groups):
     超过 Telegram 长度上限时按条目整体丢弃（不按字符硬切，
     避免切断 <a> 标签导致 Telegram 400）。
     """
-    parts = [f"🤖 AI 日报 · {date_str}"]
-    length = len(parts[0])
+    text = f"🤖 <b>AI 日报</b> · {date_str}"
+    length = len(text)
     truncated = False
-    for key, label in GROUP_LABELS:
+    for key, emoji, name in GROUP_LABELS:
         items = groups.get(key)
         if not items:
             continue
-        header = f"{label} ({len(items)})"
-        if length + 1 + len(header) > MAX_CHARS:
+        header = f"\n\n{emoji} <b>{esc(name)}</b>（{len(items)}）"
+        if length + len(header) > MAX_CHARS:
             truncated = True
             break
-        parts.append(header)
-        length += 1 + len(header)
+        text += header
+        length += len(header)
         for item in items:
-            rendered = render_item(item)
-            if length + 1 + len(rendered) > MAX_CHARS:
+            line = f"\n\n{render_item(item)}"
+            if length + len(line) > MAX_CHARS:
                 truncated = True
                 break
-            parts.append(rendered)
-            length += 1 + len(rendered)
+            text += line
+            length += len(line)
         if truncated:
             break
     if truncated:
-        parts.append("…（内容过长已截断）")
-    return "\n".join(parts)
+        text += "\n\n…（内容过长已截断）"
+    return text

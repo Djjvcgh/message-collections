@@ -50,17 +50,20 @@ def test_build_groups_sorted_and_limited():
 def test_render_digest_contains_groups_and_links():
     groups, _, _ = make_groups()
     text = render_digest("09-12", groups)
-    assert "AI 日报 · 09-12" in text
-    assert "🎁 福利速递" in text
-    assert "🚀 模型发布" in text
-    assert "🧰 产品与工具" in text
-    assert "💬 值得注意" in text
-    assert "https://example.com/zcode-token" in text
-    assert len(text) <= 3900 + 20  # 截断保护 + 省略行余量
+    assert "AI 日报" in text
+    assert "福利速递" in text
+    assert "模型发布" in text
+    assert "产品与工具" in text
+    assert "值得注意" in text
+    # 标题即链接：URL 在 href 里
+    assert '<a href="https://example.com/zcode-token">' in text
+    # 分段排版：组间有空行
+    assert "\n\n" in text
+    assert len(text) <= 3900 + 20
 
 
 def test_render_digest_empty():
-    assert render_digest("09-12", {}) == "🤖 AI 日报 · 09-12"
+    assert render_digest("09-12", {}) == "🤖 <b>AI 日报</b> · 09-12"
 
 
 def test_render_digest_truncation_never_cuts_tags():

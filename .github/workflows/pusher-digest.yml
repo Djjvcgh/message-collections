@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 1,13 * * *"   # UTC 01:00 / 13:00 = 北京 09:00 / 21:00
   workflow_dispatch:
+    inputs:
+      slot:
+        description: "槽位覆盖（如 test；留空自动 morning/evening）"
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -28,7 +33,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m pusher.run digest
+        run: python -m pusher.run digest --slot "${{ inputs.slot }}"
       - name: Commit state
         run: |
           git config user.name "pusher-bot"

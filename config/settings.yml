@@ -2,16 +2,17 @@
 channels:
   telegram:
     enabled: true
+    link_preview: false   # 关闭链接预览大图，保持消息干净
     # 本地调试可设 TELEGRAM_PROXY 环境变量走代理，线上（Actions）直连
   wecom:
     enabled: false   # 预留渠道：配置 WEWORK_WEBHOOK_URL 后改为 true
   email:
     enabled: false   # 可选兜底：配置 SMTP_* 后改为 true
 
-# 日报各组条数上限
+# 日报各组条数上限（总条数控制在单条消息长度内）
 digest:
   limits:
-    welfare: 10
-    model_release: 6
+    welfare: 8
+    model_release: 5
     product: 4
     notable: 3

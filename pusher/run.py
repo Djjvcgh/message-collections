@@ -23,6 +23,7 @@ from .notify_email import EmailChannel
 from .notify_telegram import TelegramChannel, build_instant_message
 from .notify_wecom import WeComChannel
 from .state import State
+from .translate import is_mostly_english, translate_title
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_PATH = ROOT / "state" / "state.json"
@@ -60,6 +61,7 @@ def build_channels(settings):
                     os.getenv("TELEGRAM_BOT_TOKEN"),
                     os.getenv("TELEGRAM_CHAT_ID"),
                     proxy=proxy,
+                    link_preview=tg.get("link_preview", False),
                 )
             )
         except RuntimeError as exc:
@@ -87,6 +89,21 @@ def build_channels(settings):
     return channels
 
 
+def _outbound_proxies():
+    """本地联调时复用 TELEGRAM_PROXY 作为出站代理；Actions 上为 None 直连。"""
+    proxy = os.getenv("TELEGRAM_PROXY")
+    return {"http": proxy, "https": proxy} if proxy else None
+
+
+def _translate_shown(items):
+    """只翻译将要展示的条目标题（英文→中文），译文有缓存。"""
+    proxies = _outbound_proxies()
+    for item in items:
+        if is_mostly_english(item["title"]):
+            item["title"] = translate_title(item["title"], proxies=proxies)
+    return items
+
+
 def run_instant(cfg, state, wf, channels, dry_run):
     data = fetch_latest_24h(cfg["radar"]["latest_24h_url"])
     ok, age = freshness(data, cfg["radar"].get("max_age_hours", 36))
@@ -96,6 +113,7 @@ def run_instant(cfg, state, wf, channels, dry_run):
     items = normalize_all(data)
     new = drop_pushed(wf.hits(items), state)
     log(f"welfare hits: {len(new)} (deduped)")
+    _translate_shown(new)
     for item in new:
         message = build_instant_message(item)
         if dry_run:
@@ -110,7 +128,7 @@ def run_instant(cfg, state, wf, channels, dry_run):
         _save_state(state)
 
 
-def run_digest(cfg, state, wf, channels, dry_run, slot):
+def run_digest(cfg, state, wf, channels, dry_run, slot, settings):
     data = fetch_latest_24h(cfg["radar"]["latest_24h_url"])
     ok, age = freshness(data, cfg["radar"].get("max_age_hours", 36))
     if not ok:
@@ -123,8 +141,10 @@ def run_digest(cfg, state, wf, channels, dry_run, slot):
         log(f"digest {key} already sent, skip")
         return
     items = normalize_all(data)
-    limits = cfg.get("digest", {}).get("limits", {})
+    limits = settings.get("digest", {}).get("limits", {})
     groups = build_groups(items, wf, limits)
+    for shown in groups.values():
+        _translate_shown(shown)
     text = render_digest(f"{now_bj:%m-%d}", groups)
     if dry_run:
         log(text)
@@ -165,7 +185,7 @@ def main(argv=None):
     if args.mode == "instant":
         run_instant(cfg, state, wf, channels, args.dry_run)
     else:
-        run_digest(cfg, state, wf, channels, args.dry_run, args.slot)
+        run_digest(cfg, state, wf, channels, args.dry_run, args.slot, settings)
     return 0
 
 

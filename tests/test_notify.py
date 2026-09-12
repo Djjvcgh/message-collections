@@ -2,17 +2,12 @@ import pytest
 
 from pusher.notify_base import NotifyChannel, send_all
 from pusher.notify_email import subject_from
-from pusher.notify_telegram import build_instant_message, esc, link
+from pusher.notify_telegram import build_instant_message, esc
 from pusher.notify_wecom import WeComChannel
 
 
 def test_esc_escapes_html():
     assert esc("<b>标题 & 测试") == "&lt;b&gt;标题 &amp; 测试"
-
-
-def test_link_escapes_url():
-    out = link("https://a.com/?x=1&y=2")
-    assert 'href="https://a.com/?x=1&amp;y=2"' in out
 
 
 def test_build_instant_message_layout():
@@ -24,9 +19,10 @@ def test_build_instant_message_layout():
     }
     msg = build_instant_message(item)
     assert "🎁 [福利]" in msg
-    assert "<b>ZCode 送 token 限时活动开启</b>" in msg
+    # 标题即链接，不再单独堆 URL 行
+    assert '<a href="https://example.com/zcode-token"><b>ZCode 送 token 限时活动开启</b></a>' in msg
     assert "来源：AIbase · AI垂直源" in msg
-    assert 'href="https://example.com/zcode-token"' in msg
+    assert msg.count("https://") == 1  # URL 只出现在 href 里
 
 
 class Boom(NotifyChannel):

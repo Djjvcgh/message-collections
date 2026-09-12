@@ -16,25 +16,22 @@ def esc(s):
     return html.escape(s or "", quote=False)
 
 
-def link(url):
-    return f'<a href="{html.escape(url or "", quote=True)}">{html.escape(url or "")}</a>'
-
-
 class TelegramChannel(NotifyChannel):
     name = "telegram"
 
-    def __init__(self, token, chat_id, proxy=None):
+    def __init__(self, token, chat_id, proxy=None, link_preview=False):
         if not token or not chat_id:
             raise RuntimeError("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 未配置")
         self.token = token
         self.chat_id = chat_id
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
+        self.link_preview = link_preview
 
     def send(self, text, parse_mode="HTML"):
         payload = {
             "chat_id": self.chat_id,
             "text": text,
-            "disable_web_page_preview": False,
+            "disable_web_page_preview": not self.link_preview,
         }
         if parse_mode:
             payload["parse_mode"] = parse_mode
@@ -50,9 +47,9 @@ class TelegramChannel(NotifyChannel):
 
 
 def build_instant_message(item):
-    lines = [
-        f"🎁 [福利] <b>{esc(item['title'])}</b>",
-        f"来源：{esc(item['source'])} · {esc(item['tier_label'])}",
-        link(item["url"]),
-    ]
-    return "\n".join(lines)
+    title_link = (
+        f'<a href="{html.escape(item["url"] or "", quote=True)}">'
+        f"<b>{esc(item['title'])}</b></a>"
+    )
+    src = item["source"] + (f" · {item['tier_label']}" if item["tier_label"] else "")
+    return f"🎁 [福利] {title_link}\n　来源：{esc(src)}"
