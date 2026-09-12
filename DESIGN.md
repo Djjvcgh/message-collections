@@ -1,7 +1,7 @@
 # AI 情报推送器 · 设计方案
 
-> 版本 v0.1（草案，待评审） · 2026-09-12
-> 状态：**待用户过目**，确认后按里程碑 M1 → M2 → M3 实施
+> 版本 v0.2（已按评审意见修订） · 2026-09-12
+> 修订内容：取消即时层单日条数上限（仅按 URL 去重）；推送渠道标准化为接口设计（Telegram 主渠道，预留企业微信群机器人）；新增运行方式说明
 
 ## 1. 背景与目标
 
@@ -39,6 +39,17 @@
 - **数据源 1**：ai-news-radar 公开 JSON（主源，覆盖行业大事 + 大量 X/媒体信号）
 - **数据源 2**：官方页面 diff 监控（补"定价变更/优惠上线"这类新闻盲区）
 - **数据源 3（二期可选）**：RSSHub 补 X 账号、Linux.do、Telegram 公开频道
+- 推送渠道：以接口抽象（`notify_base.py`），Telegram Bot 为标准实现；以后接企业微信群机器人只需新增一个实现文件 + 一个 Secret，不动主逻辑
+
+### 2.1 运行方式（本地电脑无需开机）
+
+**项目完全运行在 GitHub 云端。**
+
+1. 调度：GitHub Actions 由 GitHub 托管，到点自动在一台临时云端容器里启动脚本，跑完即销毁
+2. 单轮流程：拉数据 → 过滤/去重 → 推送 Telegram → state 变化 commit 回仓库
+3. 本地电脑只在两种时刻需要开机：修改配置/词表/代码，或本地调试（日常接收消息完全不依赖本地）
+4. Telegram 消息存储在 Telegram 云端，多端同步，就算推送时手机离线，内容也不会丢
+5. 费用：公开仓库 Actions 不限时免费，全程 ¥0
 
 ## 3. 信息源设计
 
@@ -77,7 +88,7 @@
   - 中文：免费 / 白嫖 / 送 / 赠 / 福利 / 优惠 / 折扣 / 学生 / 限时 / 领取 / 试用 / 额度
   - 英文：free / promo / discount / student / credit / giveaway / trial / coupon / deal
   - 排除词：广告、标题党黑名单
-- 防轰炸：单日即时推送上限 8 条，超出的并入次日日报；同一 URL 永不重复推送
+- 防重复：同一 URL 永不重复推送；**不设单日条数上限**，命中即推
 - 时效：30 分钟内送达（跟随 radar 更新节奏）
 
 ### 4.2 日报层（兜底）
@@ -100,7 +111,9 @@ Message Collections/
 │   ├── fetch_radar.py       # 拉取 + 解析 radar JSON（含新鲜度检查）
 │   ├── watch_pages.py       # 页面 diff 监控
 │   ├── filter.py            # 关键词过滤 + 去重 + 限额
-│   ├── notify_telegram.py   # Telegram 推送
+│   ├── notify_base.py       # 推送渠道抽象接口（send/格式化，渠道可插拔）
+│   ├── notify_telegram.py   # Telegram Bot 实现（主渠道）
+│   ├── notify_wecom.py      # 企业微信群机器人实现（预留接口，暂不启用）
 │   ├── notify_email.py      # 邮件推送（可选）
 │   ├── digest.py            # 日报组装
 │   └── run.py               # 统一入口
@@ -122,7 +135,7 @@ Message Collections/
 | 日报（同一 workflow 内） | `0 1,13 * * *` | UTC 01:00/13:00 = 北京 09:00/21:00 |
 
 - `workflow_dispatch` 手动触发用于调试
-- Secrets：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、（可选）`SMTP_*`
+- Secrets：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、（预留）`WEWORK_WEBHOOK_URL`、（可选）`SMTP_*`
 - 注意：Actions cron 有 ±数分钟漂移，福利场景可接受
 
 ## 8. 消息格式（示意）
@@ -171,7 +184,7 @@ https://api-docs.deepseek.com/quick_start/pricing
 | radar 上游故障 | 新鲜度检查 + 日报标注；极端情况 fork 一份自持 |
 | Actions cron 漂移/排队 | 接受 5–15 分钟延迟；福利场景可接受 |
 | 页面反爬 | r.jina.ai 兜底 / 换 RSS 路由 |
-| 关键词误报 | 排除词 + 上限保护 + 观察期调优 |
+| 关键词误报 | 排除词 + 观察期调优 |
 | X 直连成本 | 二期再评估：免费 cookie 方案 vs 付费 API |
 | Telegram 代理依赖 | 内置 MTProto 已确认可行；邮件兜底可选 |
 
