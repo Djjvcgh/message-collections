@@ -1,8 +1,7 @@
-"""日报组装：按组归类、排序、限额、渲染为 HTML 文本。
-
-排版原则：组间空行、条目间空行、标题即链接（不堆 URL、不开预览）。
-"""
+"""日报组装：每组一条消息（引用块摘要式 + 标签页脚）。"""
 import html
+import re
+from collections import Counter
 
 from .notify_telegram import esc
 
@@ -14,7 +13,8 @@ GROUP_LABELS = [
 ]
 
 PRODUCT_LABELS = ("ai_product_update", "developer_tool", "agent_workflow")
-MAX_CHARS = 3900  # Telegram 单条消息上限 4096，留出余量
+MAX_CHARS = 3900   # Telegram 单条消息上限 4096，留出余量
+REASON_MAX = 100   # 摘要一句话的最大长度
 
 
 def classify(item, welfare_filter):
@@ -37,43 +37,64 @@ def build_groups(items, welfare_filter, limits):
     return {key: kept for key, kept in groups.items() if kept}
 
 
-def render_item(item):
+def _clean_tag(s):
+    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]", "", s)
+
+
+def _footer_tags(items, group_name):
+    """页脚标签：#AI日报 + 组名 + 消息内条目信号词 top3，可在 Telegram 内点击筛选。"""
+    tags = ["AI日报", group_name]
+    counter = Counter()
+    for item in items:
+        for s in item.get("signals") or []:
+            t = _clean_tag(s)
+            if t:
+                counter[t] += 1
+    seen = {t.lower() for t in tags}
+    for t, _ in counter.most_common(3):
+        if t.lower() not in seen:
+            tags.append(t)
+            seen.add(t.lower())
+    return " ".join("#" + t for t in tags)
+
+
+def render_reason(item):
+    reason = (item.get("reason") or "").strip()
+    if len(reason) > REASON_MAX:
+        reason = reason[: REASON_MAX - 1] + "…"
+    return reason
+
+
+def render_item(item, index):
     title_link = (
         f'<a href="{html.escape(item["url"] or "", quote=True)}">'
         f"<b>{esc(item['title'])}</b></a>"
     )
+    lines = [f"{index}. {title_link}"]
+    reason = render_reason(item)
+    if reason:
+        lines.append(f"<blockquote>{esc(reason)}</blockquote>")
     src = item["source"] + (f" · {item['tier_label']}" if item["tier_label"] else "")
-    return f"• {title_link}\n　来源：{esc(src)}"
+    lines.append(f"　{esc(src)}")
+    return "\n".join(lines)
 
 
-def render_digest(date_str, groups):
-    """按 福利→模型→产品→值得注意 的优先级渲染。
-
-    超过 Telegram 长度上限时按条目整体丢弃（不按字符硬切，
-    避免切断 <a> 标签导致 Telegram 400）。
-    """
-    text = f"🤖 <b>AI 日报</b> · {date_str}"
+def render_group_message(date_str, time_str, emoji, name, items):
+    """渲染一个分组消息；超长时按条目整体丢弃，绝不切断标签。"""
+    header = f"{emoji} <b>{esc(name)}</b> · {date_str} {time_str}（{len(items)}条）"
+    text = header
     length = len(text)
     truncated = False
-    for key, emoji, name in GROUP_LABELS:
-        items = groups.get(key)
-        if not items:
-            continue
-        header = f"\n\n{emoji} <b>{esc(name)}</b>（{len(items)}）"
-        if length + len(header) > MAX_CHARS:
+    shown = 0
+    for item in items:
+        shown += 1
+        block = f"\n\n{render_item(item, shown)}"
+        if length + len(block) > MAX_CHARS:
             truncated = True
             break
-        text += header
-        length += len(header)
-        for item in items:
-            line = f"\n\n{render_item(item)}"
-            if length + len(line) > MAX_CHARS:
-                truncated = True
-                break
-            text += line
-            length += len(line)
-        if truncated:
-            break
+        text += block
+        length += len(block)
+    text += "\n\n" + _footer_tags(items, name)
     if truncated:
-        text += "\n\n…（内容过长已截断）"
+        text += "\n…（部分内容未展示）"
     return text

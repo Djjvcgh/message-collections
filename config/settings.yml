@@ -9,10 +9,10 @@ channels:
   email:
     enabled: false   # 可选兜底：配置 SMTP_* 后改为 true
 
-# 日报各组条数上限（总条数控制在单条消息长度内）
+# 日报各组条数上限（每组一条消息，条数不再受单消息长度强约束）
 digest:
   limits:
     welfare: 8
-    model_release: 5
-    product: 4
-    notable: 3
+    model_release: 6
+    product: 5
+    notable: 4

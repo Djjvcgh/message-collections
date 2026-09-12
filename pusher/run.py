@@ -10,12 +10,13 @@
 import argparse
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
 
-from .digest import build_groups, render_digest
+from .digest import GROUP_LABELS, build_groups, render_group_message
 from .fetch_radar import fetch_latest_24h, freshness, normalize_all
 from .filter import WelfareFilter, drop_pushed
 from .notify_base import send_all
@@ -96,11 +97,13 @@ def _outbound_proxies():
 
 
 def _translate_shown(items):
-    """只翻译将要展示的条目标题（英文→中文），译文有缓存。"""
+    """翻译将要展示的标题与摘要（英文→中文），译文有缓存。"""
     proxies = _outbound_proxies()
     for item in items:
         if is_mostly_english(item["title"]):
             item["title"] = translate_title(item["title"], proxies=proxies)
+        if is_mostly_english(item.get("reason") or ""):
+            item["reason"] = translate_title(item["reason"], proxies=proxies)
     return items
 
 
@@ -136,25 +139,41 @@ def run_digest(cfg, state, wf, channels, dry_run, slot, settings):
         return
     now_bj = datetime.now(BJT)
     slot = slot or ("morning" if now_bj.hour < 12 else "evening")
-    key = f"{now_bj:%Y-%m-%d}_{slot}"
-    if state.has_digest(key):
-        log(f"digest {key} already sent, skip")
-        return
     items = normalize_all(data)
     limits = settings.get("digest", {}).get("limits", {})
     groups = build_groups(items, wf, limits)
-    for shown in groups.values():
-        _translate_shown(shown)
-    text = render_digest(f"{now_bj:%m-%d}", groups)
-    if dry_run:
-        log(text)
-    else:
+
+    # 按组去重：某组发送失败只补发该组，不会全量重发
+    pending = []
+    for key, emoji, name in GROUP_LABELS:
+        gitems = groups.get(key)
+        if not gitems:
+            continue
+        gkey = f"{now_bj:%Y-%m-%d}_{slot}_{key}"
+        if state.has_digest(gkey):
+            log(f"digest {gkey} already sent, skip")
+            continue
+        pending.append((gkey, emoji, name, gitems))
+    if not pending:
+        log("nothing to send")
+        return
+
+    date_str = f"{now_bj:%Y-%m-%d}"
+    time_str = f"{now_bj:%H:%M}"
+    for i, (gkey, emoji, name, gitems) in enumerate(pending):
+        _translate_shown(gitems)
+        text = render_group_message(date_str, time_str, emoji, name, gitems)
+        if dry_run:
+            log(text + "\n\n========== 消息结束 ==========")
+            continue
         failed = send_all(channels, text, log=log)
         if failed:
-            log("digest send failed on all channels, will retry next run")
-            return
-        state.mark_digest(key)
+            log(f"group {name} send failed, will retry next run")
+            continue
+        state.mark_digest(gkey)
         _save_state(state)
+        if i < len(pending) - 1:
+            time.sleep(0.8)  # 多条连发间隔，避免触发 Telegram 限频
 
 
 def _save_state(state):

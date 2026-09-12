@@ -1,19 +1,27 @@
 import json
 from pathlib import Path
 
-from pusher.digest import build_groups, classify, render_digest
+from pusher.digest import (
+    MAX_CHARS,
+    REASON_MAX,
+    build_groups,
+    classify,
+    render_group_message,
+    render_reason,
+)
 from pusher.fetch_radar import normalize, normalize_all
 from pusher.filter import WelfareFilter
 
 FIXTURE = Path(__file__).parent / "fixtures" / "radar-sample.json"
 
 KEYWORDS = ["免费", "白嫖", "赠送", "送token", "学生", "优惠", "discount", "free"]
+EXCLUDE = ["广告", "广告位", "推广"]
 
 
 def make_groups(limits=None):
     data = json.loads(FIXTURE.read_text(encoding="utf-8"))
     items = normalize_all(data)
-    wf = WelfareFilter(KEYWORDS, ["广告", "广告位", "推广"])
+    wf = WelfareFilter(KEYWORDS, EXCLUDE)
     return build_groups(items, wf, limits or {}), wf, items
 
 
@@ -28,7 +36,6 @@ def test_classify_routes_by_label():
 
 
 def test_build_groups_sorted_and_limited():
-    # 造 3 条 model_release 验证限额与排序
     data = json.loads(FIXTURE.read_text(encoding="utf-8"))
     base = data["items_ai"][3]  # DeepSeek V4.1
     extra = []
@@ -47,28 +54,53 @@ def test_build_groups_sorted_and_limited():
     assert mr[0]["url"] == "https://example.com/ds-v41"  # 官方一手源在前
 
 
-def test_render_digest_contains_groups_and_links():
+def test_render_reason_truncates():
+    assert render_reason({"reason": "短摘要"}) == "短摘要"
+    long = "很" * 200
+    out = render_reason({"reason": long})
+    assert len(out) == REASON_MAX
+    assert out.endswith("…")
+
+
+def test_render_group_message_layout():
     groups, _, _ = make_groups()
-    text = render_digest("09-12", groups)
-    assert "AI 日报" in text
-    assert "福利速递" in text
-    assert "模型发布" in text
-    assert "产品与工具" in text
-    assert "值得注意" in text
-    # 标题即链接：URL 在 href 里
-    assert '<a href="https://example.com/zcode-token">' in text
-    # 分段排版：组间有空行
-    assert "\n\n" in text
-    assert len(text) <= 3900 + 20
+    text = render_group_message("2026-09-12", "21:00", "🎁", "福利速递", groups["welfare"])
+    # 头部：组名 + 完整日期时间 + 条数
+    assert "🎁 <b>福利速递</b> · 2026-09-12 21:00（2条）" in text
+    # 标题即链接 + 编号（福利组官方源优先，gemini-student tier 0 在前）
+    assert '1. <a href="https://example.com/gemini-student"><b>' in text
+    assert '<a href="https://example.com/zcode-token"><b>' in text
+    # 引用块摘要（fixture 条目 reason 为中文）
+    assert "<blockquote>" in text and "</blockquote>" in text
+    # 分段：条目间空行
+    assert "\n\n2. " in text
+    # 页脚标签
+    assert "#AI日报 #福利速递" in text
 
 
-def test_render_digest_empty():
-    assert render_digest("09-12", {}) == "🤖 <b>AI 日报</b> · 09-12"
+def test_footer_tags_include_signals():
+    groups, _, _ = make_groups()
+    text = render_group_message("2026-09-12", "21:00", "🎁", "福利速递", groups["welfare"])
+    # a1 信号词 zcode、a2 信号词 gemini，聚合进页脚
+    assert "#zcode" in text
+    assert "#gemini" in text
 
 
-def test_render_digest_truncation_never_cuts_tags():
-    from pusher.digest import MAX_CHARS
+def test_render_group_message_no_reason_skips_blockquote():
+    item = {
+        "title": "纯标题条目",
+        "url": "https://example.com/x",
+        "source": "S",
+        "tier_label": "",
+        "reason": "",
+        "signals": [],
+    }
+    text = render_group_message("2026-09-12", "21:00", "💬", "值得注意", [item])
+    assert "<blockquote>" not in text
+    assert "1. " in text
 
+
+def test_render_group_message_truncation_never_cuts_tags():
     def big_item(n):
         return {
             "title": f"很长的模型发布标题第{n}条" + "补充细节" * 30,
@@ -79,13 +111,13 @@ def test_render_digest_truncation_never_cuts_tags():
             "score": 0.9,
             "label": "model_release",
             "url": f"https://example.com/very/long/url/segment-{n}/more/segments",
-            "signals": [],
-            "reason": "",
+            "signals": [f"tag{n}"],
+            "reason": "一句话摘要" * 10,
         }
 
-    groups = {"model_release": [big_item(n) for n in range(30)]}
-    text = render_digest("09-12", groups)
-    assert len(text) <= MAX_CHARS + 20
-    assert text.count("<a ") == text.count("</a>")  # 标签必须成对完整
-    assert text.count("<b>") == text.count("</b>")
-    assert text.endswith("…（内容过长已截断）")
+    items = [big_item(n) for n in range(30)]
+    text = render_group_message("2026-09-12", "21:00", "🚀", "模型发布", items)
+    assert len(text) <= MAX_CHARS + 40
+    assert text.count("<a ") == text.count("</a>")
+    assert text.count("<blockquote>") == text.count("</blockquote>")
+    assert "#AI日报 #模型发布" in text  # 截断后页脚标签仍在
