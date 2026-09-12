@@ -16,11 +16,17 @@ class NotifyChannel:
 
 
 def send_all(channels, text, parse_mode=None, log=print):
-    """向所有渠道发送；单渠道失败不影响其他渠道。返回失败的渠道名列表。"""
+    """向所有渠道发送；单渠道失败不影响其他渠道。返回失败的渠道名列表。
+
+    parse_mode=None 表示"交给各渠道用自身默认值"（如 Telegram 用 HTML）。
+    """
     failed = []
     for ch in channels:
         try:
-            ch.send(text, parse_mode=parse_mode)
+            if parse_mode is None:
+                ch.send(text)
+            else:
+                ch.send(text, parse_mode=parse_mode)
             log(f"[{ch.name}] sent ({len(text)} chars)")
         except Exception as exc:  # noqa: BLE001 — 单渠道故障必须被隔离
             log(f"[{ch.name}] send failed: {exc}")

@@ -31,18 +31,22 @@ class TelegramChannel(NotifyChannel):
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
 
     def send(self, text, parse_mode="HTML"):
+        payload = {
+            "chat_id": self.chat_id,
+            "text": text,
+            "disable_web_page_preview": False,
+        }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         resp = requests.post(
             f"{API}/bot{self.token}/sendMessage",
-            json={
-                "chat_id": self.chat_id,
-                "text": text,
-                "parse_mode": parse_mode,
-                "disable_web_page_preview": False,
-            },
+            json=payload,
             timeout=30,
             proxies=self.proxies,
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # 带上 Telegram 的错误描述，便于定位（如 can't parse entities）
+            raise RuntimeError(f"Telegram API {resp.status_code}: {resp.text[:200]}")
 
 
 def build_instant_message(item):

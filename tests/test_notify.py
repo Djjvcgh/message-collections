@@ -51,6 +51,46 @@ def test_send_all_isolates_failures():
     assert OK.sent == ["hello"]
 
 
+class Record(NotifyChannel):
+    """记录调用参数的渠道，用于验证 parse_mode 传递规则。"""
+
+    name = "record"
+
+    def __init__(self):
+        self.calls = []
+
+    def send(self, text, parse_mode=None):
+        self.calls.append((text, parse_mode))
+
+
+def test_send_all_none_parse_mode_uses_channel_default():
+    ch = Record()
+    send_all([ch], "hello", log=lambda *_: None)
+    # parse_mode=None 时不应显式传参，渠道用自身默认值
+    assert ch.calls == [("hello", None)]
+
+
+def test_telegram_omits_parse_mode_key_when_none(monkeypatch):
+    import pusher.notify_telegram as nt
+
+    captured = {}
+
+    class FakeResp:
+        status_code = 200
+
+    def fake_post(url, json=None, timeout=None, proxies=None):
+        captured["payload"] = json
+        return FakeResp()
+
+    monkeypatch.setattr(nt.requests, "post", fake_post)
+    ch = nt.TelegramChannel("t", "c")
+    ch.send("hi", parse_mode=None)
+    assert "parse_mode" not in captured["payload"]
+
+    ch.send("hi")
+    assert captured["payload"]["parse_mode"] == "HTML"
+
+
 def test_wecom_requires_webhook():
     with pytest.raises(RuntimeError):
         WeComChannel(None)
