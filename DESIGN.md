@@ -1,7 +1,7 @@
 # AI 情报推送器 · 设计方案
 
-> 版本 v0.3（随实施同步修订） · 2026-09-13
-> 实施状态：**M1 已上线运行**（Telegram 即时层 + 日报层）；M2 页面 diff 监控、M3 调优补源未开始
+> 版本 v0.4（随实施同步修订） · 2026-09-13
+> 实施状态：**M1 已上线**（即时层 + 日报层）、**M2 已上线**（页面 diff 监控）；M3 调优补源未开始
 
 ## 1. 背景与目标
 
@@ -53,9 +53,23 @@
 - 实测质量：85 信源 / 24h 窗口 200+ 条 AI 强相关 / 30 分钟更新 / 官方一手源（T0）优先 / `ai_label` 分类 / 自带中文摘要 `recommend_reason_zh`
 - 降级策略：`generated_at` 距今超 36 小时视为上游故障 → 本轮跳过
 
-### 3.2 页面 diff 监控（M2，未实施）
+### 3.2 页面 diff 监控（M2，已上线）
 
-对固定清单页面（DeepSeek/OpenAI 定价页、Gemini 学生优惠页、Z.ai/BigModel 公告页等）定期抓正文与上次快照对比，变化即推。`config/sources.yml` 已预留 `page_watch` 字段。
+对固定清单页面定期抓正文与指纹快照对比，变化即推送：
+
+| 页面 | 覆盖 |
+|---|---|
+| DeepSeek API 定价页 | 降价/调价 |
+| OpenAI 定价页（platform.openai.com/docs/pricing） | 定价/Codex 相关 |
+| 智谱 BigModel 定价页 | ZCode/GLM 送 token、调价 |
+| Z.ai API 页 | GLM 定价与权益 |
+
+实现要点：
+
+- **抓取走 r.jina.ai**（渲染 JS、输出稳定 markdown），失败回退直连；直连 HTML 因动态内容多、快照噪声大而只做兜底
+- 快照只存 **SHA 指纹 + 字符数**（一行文本），不存全文，git 不膨胀
+- 首访页面静默落基线不推送；无变化不写盘；推送成功才更新快照（失败自动下轮重试）
+- Google 学生优惠页跳登录页已弃用；**GitHub 学生包页因内容含轮播位实测抖动 20 字符被移除**——含轮播/计数器的页面不适合此方案，接入新页面前先观察两轮指纹稳定性
 
 ### 3.3 RSSHub 补源（M3，未实施）
 
@@ -88,6 +102,7 @@
 
 - `state/state.json`：已推送 URL（滚动 7 天）+ 日报记账（`日期_槽位_组名`）
 - `state/translations.json`：译文缓存
+- `state/pages/<name>.txt`：页面指纹快照（`sha256前16位 字符数`）
 - 每次运行后 state 变化 commit 回仓库 —— 仓库持续有提交，规避 GitHub"60 天无活动停用定时任务"
 
 ## 6. 项目结构
@@ -98,6 +113,7 @@ Message Collections/
 │   ├── fetch_radar.py       # 拉取 + 解析 radar JSON（含新鲜度检查）
 │   ├── filter.py            # 福利关键词过滤（中英文）+ 去重
 │   ├── translate.py         # 英文标题/摘要翻译（降级链 + 缓存）
+│   ├── watch_pages.py       # 页面 diff 监控（jina 优先/直连兜底/指纹快照）
 │   ├── digest.py            # 日报分组、渲染（引用块/via/标签页脚）
 │   ├── notify_base.py       # 推送渠道抽象接口
 │   ├── notify_telegram.py   # Telegram 实现（主渠道）
@@ -157,13 +173,23 @@ via AIbase · AI垂直源
 #AI日报 #模型发布 #deepseek #openai
 ```
 
+**页面更新（M2）：**
+
+```
+📄 [页面更新] Models & Pricing | DeepSeek API Docs
+
+▎监控页面内容发生变化（23331 → 23410 字符），可能与定价或优惠调整有关……
+
+via deepseek-pricing
+```
+
 ## 9. 实施里程碑
 
 | 里程碑 | 状态 | 说明 |
 |---|---|---|
 | **M1 主链路** | ✅ 2026-09-13 上线 | radar 接入 + 即时推送 + 分组日报 + 翻译 + 按组去重 |
-| **M2 页面监控** | 未开始 | `page_watch` 字段已预留 |
-| **M3 调优补源** | 未开始 | 词表按误报率调优、RSSHub 补源、邮件兜底 |
+| **M2 页面监控** | ✅ 2026-09-13 上线 | 4 页清单（DeepSeek/OpenAI/BigModel/Z.ai）+ 指纹快照 |
+| **M3 调优补源** | 未开始 | 词表按误报率调优、RSSHub 补源、邮件兜底、抖动页面防抖 |
 
 ## 10. 风险与对策
 

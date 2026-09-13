@@ -18,6 +18,7 @@ GitHub Actions (cron 错峰调度)
 
 - **即时层**：每小时 :13 / :43 运行，福利词命中即推（同 URL 永不重复）
 - **日报层**：每天 09:23 / 21:23，每组各发一条消息
+- **页面监控**：DeepSeek/OpenAI/BigModel/Z.ai 定价页 diff，内容变化即推（M2）
 
 ## 消息样式
 
@@ -65,6 +66,6 @@ TELEGRAM_PROXY=http://127.0.0.1:7897   # 本地无代理可不填；翻译接口
 |---|---|
 | `config/keywords.yml` | 福利词表 / 排除词 |
 | `config/settings.yml` | 渠道开关、日报各组条数 |
-| `config/sources.yml` | 数据源地址、页面监控清单（M2） |
+| `config/sources.yml` | 数据源地址、页面监控清单 |
 
 详细设计见 [DESIGN.md](DESIGN.md)。
