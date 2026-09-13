@@ -68,12 +68,13 @@ def render_via(item):
 
 
 def render_item(item, index):
+    """标题 / 摘要 / via 来源之间用空行分隔，段落呼吸感优先。"""
     lines = [f"{index}. <b>{esc(item['title'])}</b>"]
     reason = (item.get("reason") or "").strip()
     if reason:
         lines.append(f"<blockquote>{esc(reason)}</blockquote>")
     lines.append(render_via(item))
-    return "\n".join(lines)
+    return "\n\n".join(lines)
 
 
 def render_group_message(date_str, time_str, emoji, name, items):

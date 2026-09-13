@@ -71,8 +71,11 @@ def test_render_group_message_layout():
     assert "1. <b>" in text
     # 引用块摘要（fixture 条目 reason 为中文）
     assert "<blockquote>" in text and "</blockquote>" in text
-    # via 来源行：URL 内嵌在来源名里
+    # via 来源行：URL 内嵌在来源名里，且与标题/摘要空行分隔
     assert 'via <a href="https://example.com/gemini-student">Google Blog</a>' in text
+    assert "\n\nvia <a " in text
+    # 标题与引用块之间空行分隔
+    assert "</b>\n\n<blockquote>" in text
     # 分段：条目间空行
     assert "\n\n2. " in text
     # 页脚标签

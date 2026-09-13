@@ -19,10 +19,9 @@ def test_build_instant_message_layout():
         "reason": "ZCode 推出送 token 活动",
     }
     msg = build_instant_message(item)
-    # 样式：标题 → 引用块摘要 → via 来源（URL 内嵌）
-    assert "🎁 [福利] <b>ZCode 送 token 限时活动开启</b>" in msg
-    assert "<blockquote>ZCode 推出送 token 活动</blockquote>" in msg
-    assert 'via <a href="https://example.com/zcode-token">AIbase</a> · AI垂直源' in msg
+    # 样式：标题 → 空行 → 引用块摘要 → 空行 → via 来源（URL 内嵌）
+    assert "🎁 [福利] <b>ZCode 送 token 限时活动开启</b>\n\n<blockquote>" in msg
+    assert "</blockquote>\n\nvia <a href=\"https://example.com/zcode-token\">AIbase</a> · AI垂直源" in msg
 
 
 class Boom(NotifyChannel):

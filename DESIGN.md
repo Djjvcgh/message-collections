@@ -1,7 +1,7 @@
 # AI 情报推送器 · 设计方案
 
-> 版本 v0.2（已按评审意见修订） · 2026-09-12
-> 修订内容：取消即时层单日条数上限（仅按 URL 去重）；推送渠道标准化为接口设计（Telegram 主渠道，预留企业微信群机器人）；新增运行方式说明
+> 版本 v0.3（随实施同步修订） · 2026-09-13
+> 实施状态：**M1 已上线运行**（Telegram 即时层 + 日报层）；M2 页面 diff 监控、M3 调优补源未开始
 
 ## 1. 背景与目标
 
@@ -10,15 +10,15 @@
 | 类型 | 示例 | 优先级 |
 |---|---|---|
 | **A. 福利活动** | ZCode 送 token、Gemini 学生优惠、限时免费、API 折扣 | 最高（即时推送） |
-| **B. 行业大事** | DeepSeek 降价、Codex 重置、Gemini 新模型发布 | 次高（日报+大事即时） |
+| **B. 行业大事** | DeepSeek 降价、Codex 重置、Gemini 新模型发布 | 次高（分组日报） |
 
 需求约束：
 
 - **推送制**：信息主动送达，不是手动查询拉取
 - **免挑选**：自动过滤，不需要人工刷信息流
-- **防错过**：重要消息即时提醒 + 每日摘要兜底
+- **防错过**：福利即时提醒 + 每日两次分组日报兜底
 - **零成本、免维护**：无自有服务器、无付费 API
-- **渠道**：Telegram Bot 主渠道（已确认：App 内置 MTProto 代理，非全天开代理也能收）；邮件兜底（可选）
+- **渠道**：Telegram Bot 主渠道（App 内置 MTProto 代理，非全天开代理也能收）；邮件兜底（可选）
 
 ## 2. 总体架构
 
@@ -37,71 +37,58 @@
 
 - 运行环境：GitHub Actions 定时任务（公开仓库免费不限时）
 - **数据源 1**：ai-news-radar 公开 JSON（主源，覆盖行业大事 + 大量 X/媒体信号）
-- **数据源 2**：官方页面 diff 监控（补"定价变更/优惠上线"这类新闻盲区）
+- **数据源 2**：官方页面 diff 监控（M2，补"定价变更/优惠上线"新闻盲区）
 - **数据源 3（二期可选）**：RSSHub 补 X 账号、Linux.do、Telegram 公开频道
-- 推送渠道：以接口抽象（`notify_base.py`），Telegram Bot 为标准实现；以后接企业微信群机器人只需新增一个实现文件 + 一个 Secret，不动主逻辑
+- 推送渠道：以接口抽象（`notify_base.py`），Telegram Bot 为标准实现；以后接企业微信群机器人只需新增实现 + 一个 Secret
 
 ### 2.1 运行方式（本地电脑无需开机）
 
-**项目完全运行在 GitHub 云端。**
-
-1. 调度：GitHub Actions 由 GitHub 托管，到点自动在一台临时云端容器里启动脚本，跑完即销毁
-2. 单轮流程：拉数据 → 过滤/去重 → 推送 Telegram → state 变化 commit 回仓库
-3. 本地电脑只在两种时刻需要开机：修改配置/词表/代码，或本地调试（日常接收消息完全不依赖本地）
-4. Telegram 消息存储在 Telegram 云端，多端同步，就算推送时手机离线，内容也不会丢
-5. 费用：公开仓库 Actions 不限时免费，全程 ¥0
+项目完全运行在 GitHub 云端：到点自动在临时容器里执行"拉数据 → 过滤 → 推送 → state commit 回仓库"，跑完销毁。本地只在改配置/调试时需要开机。Telegram 消息存云端多端同步。费用为 0。
 
 ## 3. 信息源设计
 
-### 3.1 ai-news-radar（主源，即时 + 日报）
+### 3.1 ai-news-radar（主源）
 
-- 地址：`https://news.learnprompt.pro/data/latest-24h.json`
-  （注意：原 `learnprompt.github.io` 地址已 301 到此域名）
-- 已验证的数据质量（2026-09-12 实测）：85 信源 / 24h 窗口 231 条 AI 强相关 / 30 分钟更新 / 官方一手源（T0）优先排序 / `ai_label` 分类齐全
-- 用途：福利关键词即时推送、每日日报、行业大事追踪
-- 降级策略：`generated_at` 距今超过 36 小时视为上游故障 → 本轮跳过，并在下一条日报中如实标注
+- 地址：`https://news.learnprompt.pro/data/latest-24h.json`（原 github.io 地址已 301）
+- 实测质量：85 信源 / 24h 窗口 200+ 条 AI 强相关 / 30 分钟更新 / 官方一手源（T0）优先 / `ai_label` 分类 / 自带中文摘要 `recommend_reason_zh`
+- 降级策略：`generated_at` 距今超 36 小时视为上游故障 → 本轮跳过
 
-### 3.2 页面 diff 监控（补盲区）
+### 3.2 页面 diff 监控（M2，未实施）
 
-新闻抓取对"定价调整、学生优惠悄悄上线"这类**页面内容变化**不敏感。对固定清单页面定期抓正文（反爬失败时用 r.jina.ai 兜底），与上次快照对比，内容变化即推送。
+对固定清单页面（DeepSeek/OpenAI 定价页、Gemini 学生优惠页、Z.ai/BigModel 公告页等）定期抓正文与上次快照对比，变化即推。`config/sources.yml` 已预留 `page_watch` 字段。
 
-初始监控清单（实施时逐个验证可达性与反爬策略，可增删）：
+### 3.3 RSSHub 补源（M3，未实施）
 
-- DeepSeek API 定价页
-- OpenAI 定价页 / Codex 相关页面
-- Google One / Gemini 学生优惠页
-- Z.ai（ZCode）/ BigModel 公告与定价页
-- GitHub Copilot 学生/教师免费页
+官方 X 账号（免费方案需自建 RSSHub + cookie，或 SocialData 付费 API）、Linux.do 板块、`t.me/s/` 公开频道网页预览。
 
-### 3.3 RSSHub 补源（二期，可选）
+## 4. 推送策略
 
-- 官方 X 账号 → RSSHub 路由（免费方案需自建 RSSHub + 账号 cookie，token 会过期需偶尔维护；或 SocialData 等付费 API，量小很便宜）
-- Linux.do 福利板块、`t.me/s/<频道名>` 公开频道网页预览（零鉴权可抓）
-- 你加入的 Telegram 私群：Telethon 用户号 API 可读（灰色用法，二期再评估）
+### 4.1 即时层（福利，低量高保真）
 
-## 4. 推送策略（两层，解决"免挑选 + 防错过"）
+- 触发：**AI 相关 × 福利词**双重命中（中英文词表，英文词带词边界，`config/keywords.yml`）
+- 防重复：同一 URL 永不重复推送；不设条数上限
+- 样式：`🎁 [福利] 标题` → 引用块摘要 → `via 来源`（URL 内嵌来源名），三段空行分隔
 
-### 4.1 即时层（低量高保真）
+### 4.2 日报层（行业大事，兜底）
 
-- 触发条件：**AI 相关 × 福利词** 双重命中（页面 diff 有变化默认触发）
-- 福利词表（配置化，`config/keywords.yml`）：
-  - 中文：免费 / 白嫖 / 送 / 赠 / 福利 / 优惠 / 折扣 / 学生 / 限时 / 领取 / 试用 / 额度
-  - 英文：free / promo / discount / student / credit / giveaway / trial / coupon / deal
-  - 排除词：广告、标题党黑名单
-- 防重复：同一 URL 永不重复推送；**不设单日条数上限**，命中即推
-- 时效：30 分钟内送达（跟随 radar 更新节奏）
+- 时间：每天北京 09:23 / 21:23 各一轮（cron 错峰，见第 7 节）
+- **每组各发一条消息**：🎁 福利速递（8条）/ 🚀 模型发布（6条）/ 🧰 产品与工具（5条）/ 💬 值得注意（4条），有条目才发
+- 条目样式：`编号. 加粗标题` → 引用块完整摘要（不截断）→ `via 来源`，全部空行分隔
+- 页脚标签：`#AI日报 #组名 #信号词top3`，Telegram 内可点击筛选
+- 排序：官方一手源（tier）优先，同层按 AI 相关分
+- **按组去重**：记账键为「日期_槽位_组名」，某组发送失败下轮只补发该组
 
-### 4.2 日报层（兜底）
+### 4.3 英文自动翻译
 
-- 时间：每日北京时间 09:00 / 21:00 各一条（可调）
-- 内容：按类别分组（福利速递 / 模型发布 / 产品与工具 / 值得注意），官方一手源优先、重要度排序，每条带原文链接
-- 可选同步发一份邮件副本
+- 范围：将要展示的标题与摘要；以英文为主（CJK 占比 < 25%）才触发
+- 降级链：Google gtx → MyMemory → 保留原文；任一失败静默降级，不阻塞推送
+- 缓存：`state/translations.json` 按标题哈希缓存，同一标题只译一次
 
 ## 5. 状态管理与去重
 
-- `state/state.json`：已推送条目索引（url hash → 日期），滚动保留 7 天
-- `state/pages/<name>.txt`：页面监控快照 + 内容 hash
-- 每次运行后把 state 变化 commit 回仓库 —— 副作用是仓库持续有提交，**Actions 定时任务不会触发 GitHub"60 天无活动自动停用"**（TrendRadar 需要手动签到续期的问题在这里天然规避）
+- `state/state.json`：已推送 URL（滚动 7 天）+ 日报记账（`日期_槽位_组名`）
+- `state/translations.json`：译文缓存
+- 每次运行后 state 变化 commit 回仓库 —— 仓库持续有提交，规避 GitHub"60 天无活动停用定时任务"
 
 ## 6. 项目结构
 
@@ -109,90 +96,88 @@
 Message Collections/
 ├── pusher/
 │   ├── fetch_radar.py       # 拉取 + 解析 radar JSON（含新鲜度检查）
-│   ├── watch_pages.py       # 页面 diff 监控
-│   ├── filter.py            # 关键词过滤 + 去重 + 限额
-│   ├── notify_base.py       # 推送渠道抽象接口（send/格式化，渠道可插拔）
-│   ├── notify_telegram.py   # Telegram Bot 实现（主渠道）
-│   ├── notify_wecom.py      # 企业微信群机器人实现（预留接口，暂不启用）
-│   ├── notify_email.py      # 邮件推送（可选）
-│   ├── digest.py            # 日报组装
-│   └── run.py               # 统一入口
+│   ├── filter.py            # 福利关键词过滤（中英文）+ 去重
+│   ├── translate.py         # 英文标题/摘要翻译（降级链 + 缓存）
+│   ├── digest.py            # 日报分组、渲染（引用块/via/标签页脚）
+│   ├── notify_base.py       # 推送渠道抽象接口
+│   ├── notify_telegram.py   # Telegram 实现（主渠道）
+│   ├── notify_wecom.py      # 企业微信机器人（预留）
+│   ├── notify_email.py      # 邮件（可选预留）
+│   └── run.py               # 统一入口（instant / digest）
 ├── config/
-│   ├── sources.yml          # 页面监控清单 + 各源开关
-│   └── keywords.yml         # 福利词表 / 排除词 / 限额
+│   ├── sources.yml          # 数据源 + 页面监控清单
+│   ├── keywords.yml         # 福利词表 / 排除词
+│   └── settings.yml         # 渠道开关、日报条数限制
 ├── state/                   # 运行状态（git 管理）
-├── tests/                   # pytest：过滤、去重、日报组装等纯逻辑
-└── .github/workflows/pusher.yml
+├── tests/                   # pytest（36 个用例）
+└── .github/workflows/       # instant-push / digest-push / tests
 ```
 
-技术栈：Python 3.11 + requests，最小依赖；无数据库、无服务器，git 即数据库。
+技术栈：Python 3.11 + requests + PyYAML；无数据库、无服务器，git 即数据库。
 
 ## 7. GitHub Actions 调度
 
 | Workflow | Cron (UTC) | 说明 |
 |---|---|---|
-| pusher.yml | `*/30 * * * *` | 与 radar 30 分钟更新节奏对齐 |
-| 日报（同一 workflow 内） | `0 1,13 * * *` | UTC 01:00/13:00 = 北京 09:00/21:00 |
+| instant-push | `13,43 * * * *` | 每小时 :13/:43 |
+| digest-push | `23 1,13 * * *` | 北京 09:23 / 21:23 |
+| tests | push / PR 触发 | pytest 全绿门禁 |
 
-- `workflow_dispatch` 手动触发用于调试
-- Secrets：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、（预留）`WEWORK_WEBHOOK_URL`、（可选）`SMTP_*`
-- 注意：Actions cron 有 ±数分钟漂移，福利场景可接受
+**教训**：cron 排在整点/半点会被 GitHub 高峰期大幅延迟（实测 `*/30` 退化为约 2 小时一次、日报直接错过），官方也建议避开整点，故全部错峰。Secrets：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、（预留）`WEWORK_WEBHOOK_URL`、（可选）`SMTP_*`。`workflow_dispatch` 支持手动触发，digest 可传 `slot` 参数用于预览（如 `v3`）。
 
-## 8. 消息格式（示意）
+## 8. 消息格式（实际样式）
 
-**即时提醒（福利命中）：**
-
-```
-🎁 [福利] DeepSeek V4.1-Flash 登陆 WorkBuddy，限时免费试用
-来源：AIbase · 官方/媒体分层 · 2 小时前
-https://www.aibase.com/news/30995
-```
-
-**即时提醒（页面变化）：**
+**即时提醒：**
 
 ```
-📉 [定价变更] DeepSeek API 定价页内容有更新
-对比摘要：输入价格 $0.27/M → $0.20/M（待实施时自动生成）
-https://api-docs.deepseek.com/quick_start/pricing
+🎁 [福利] DeepSeek V4.1-Flash 登陆 WorkBuddy，开启限时免费试用
+
+▎DeepSeek 新模型上线第三方客户端，限时全量免费……
+
+via AIbase · AI垂直源
 ```
 
-**每日日报：**
+**日报（每组一条，示意两条条目）：**
 
 ```
-🤖 AI 日报 · 09-12
-■ 福利速递 (2)
- ■ 🎁 大模型六重奏：6 款模型 14 天免费不限量（9.11–9.25） — @nhxao
-■ 模型发布 (5)
- ■ OpenAI 开放全双工语音模型 GPT-Live-1 API（$0.05/min） — AIbase
- ■ …
-■ 产品与工具 (3)
-■ 值得注意 (2)
+🚀 模型发布 · 2026-09-13 09:23（6条）
+
+1. OpenAI 开放 GPT-Live-1 语音 API
+
+▎每分钟 $0.05，把 ChatGPT 同款语音能力交给开发者……
+
+via OpenAI News · 官方一手源
+
+2. DeepSeek 发布 V4.1-Flash
+
+▎登陆 WorkBuddy，开启限时免费试用
+
+via AIbase · AI垂直源
+
+#AI日报 #模型发布 #deepseek #openai
 ```
 
 ## 9. 实施里程碑
 
-| 里程碑 | 内容 | 验收标准 |
+| 里程碑 | 状态 | 说明 |
 |---|---|---|
-| **M1 主链路** | radar 接入 + 福利即时推送 + Telegram + 每日日报 + 去重状态 | 手动触发跑通真实推送；pytest 全绿 |
-| **M2 页面监控** | diff 监控 + 变更推送 | 初始清单 5 个页面跑通 |
-| **M3 调优补源** | RSSHub X/Linux.do、词表按误报率调优、邮件兜底 | 观察一周误报 < 每天 1 条 |
+| **M1 主链路** | ✅ 2026-09-13 上线 | radar 接入 + 即时推送 + 分组日报 + 翻译 + 按组去重 |
+| **M2 页面监控** | 未开始 | `page_watch` 字段已预留 |
+| **M3 调优补源** | 未开始 | 词表按误报率调优、RSSHub 补源、邮件兜底 |
 
 ## 10. 风险与对策
 
 | 风险 | 对策 |
 |---|---|
-| radar 上游故障 | 新鲜度检查 + 日报标注；极端情况 fork 一份自持 |
-| Actions cron 漂移/排队 | 接受 5–15 分钟延迟；福利场景可接受 |
-| 页面反爬 | r.jina.ai 兜底 / 换 RSS 路由 |
-| 关键词误报 | 排除词 + 观察期调优 |
-| X 直连成本 | 二期再评估：免费 cookie 方案 vs 付费 API |
-| Telegram 代理依赖 | 内置 MTProto 已确认可行；邮件兜底可选 |
+| radar 上游故障 | 新鲜度检查 + 跳过该轮；极端情况 fork 自持 |
+| cron 整点被 GitHub 限流 | 已错峰（:13/:43、:23）；仍可能有小幅漂移 |
+| 页面反爬（M2） | r.jina.ai 兜底 / 换 RSS 路由 |
+| 关键词误报 | 排除词 + 观察期调优（`deal` 已因误报除名） |
+| Google 翻译 429 | MyMemory 降级 + 缓存；全败回退原文 |
+| Telegram 代理依赖 | App 内置 MTProto 已确认可行；邮件兜底可选 |
 
-## 11. 仓库与协作方式
+## 11. 仓库与协作
 
-- 仓库：当前 workspace（Message Collections）直接作为项目仓库，push 到你的 GitHub **公开仓库**（Actions 免费的关键）
-- 遵循 AGENTS.md：每个里程碑完成后单独 commit，pytest 全绿再交付
-- **待你确认的事项**：
-  1. 仓库放当前 workspace 并新建 GitHub 公开 repo，是否 OK？
-  2. 日报时间 09:00 / 21:00（北京时间）是否合适？
-  3. Bot token 届时配置为 GitHub Secret（不进代码、不进对话）
+- 仓库：[Djjvcgh/message-collections](https://github.com/Djjvcgh/message-collections)（public，main 分支）
+- 遵循 AGENTS.md：每次改动单独 commit，pytest 全绿再交付
+- 运行记录：Actions 页可查每次推送日志；`slot` 参数可发预览不污染正常收报

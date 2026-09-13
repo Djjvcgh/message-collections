@@ -47,7 +47,7 @@ class TelegramChannel(NotifyChannel):
 
 
 def build_instant_message(item):
-    """即时福利消息，与日报条目同款样式：标题 → 引用块摘要 → via 来源。"""
+    """即时福利消息，与日报条目同款样式：标题 → 引用块摘要 → via 来源，空行分隔。"""
     lines = [f"🎁 [福利] <b>{esc(item['title'])}</b>"]
     reason = (item.get("reason") or "").strip()
     if reason:
@@ -59,4 +59,4 @@ def build_instant_message(item):
         lines.append(f'via <a href="{url}">{esc(src)}</a>{esc(tier)}')
     else:
         lines.append(f"via {esc(src)}{esc(tier)}")
-    return "\n".join(lines)
+    return "\n\n".join(lines)
