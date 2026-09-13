@@ -113,6 +113,7 @@ def _run_page_watch(cfg, channels, dry_run):
     pages = cfg.get("page_watch") or []
     if not pages:
         return
+    log(f"page watch: {len(pages)} pages")
     changes = check_pages(pages, STATE_PATH.parent / "pages",
                           proxies=_outbound_proxies(), log=log)
     if not changes:
