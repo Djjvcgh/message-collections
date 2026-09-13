@@ -3,11 +3,9 @@ from pathlib import Path
 
 from pusher.digest import (
     MAX_CHARS,
-    REASON_MAX,
     build_groups,
     classify,
     render_group_message,
-    render_reason,
 )
 from pusher.fetch_radar import normalize, normalize_all
 from pusher.filter import WelfareFilter
@@ -54,12 +52,14 @@ def test_build_groups_sorted_and_limited():
     assert mr[0]["url"] == "https://example.com/ds-v41"  # 官方一手源在前
 
 
-def test_render_reason_truncates():
-    assert render_reason({"reason": "短摘要"}) == "短摘要"
-    long = "很" * 200
-    out = render_reason({"reason": long})
-    assert len(out) == REASON_MAX
-    assert out.endswith("…")
+def test_render_reason_full_no_truncation():
+    from pusher.digest import render_item
+
+    item = {"reason": "很" * 300, "title": "t", "url": "https://a.com",
+            "source": "S", "tier_label": "", "signals": []}
+    text = render_item(item, 1)
+    assert "很" * 300 in text  # 摘要完整展示，无省略号
+    assert "…" not in text.replace("很", "")
 
 
 def test_render_group_message_layout():
@@ -67,11 +67,12 @@ def test_render_group_message_layout():
     text = render_group_message("2026-09-12", "21:00", "🎁", "福利速递", groups["welfare"])
     # 头部：组名 + 完整日期时间 + 条数
     assert "🎁 <b>福利速递</b> · 2026-09-12 21:00（2条）" in text
-    # 标题即链接 + 编号（福利组官方源优先，gemini-student tier 0 在前）
-    assert '1. <a href="https://example.com/gemini-student"><b>' in text
-    assert '<a href="https://example.com/zcode-token"><b>' in text
+    # 标题加粗（非链接），编号在最前
+    assert "1. <b>" in text
     # 引用块摘要（fixture 条目 reason 为中文）
     assert "<blockquote>" in text and "</blockquote>" in text
+    # via 来源行：URL 内嵌在来源名里
+    assert 'via <a href="https://example.com/gemini-student">Google Blog</a>' in text
     # 分段：条目间空行
     assert "\n\n2. " in text
     # 页脚标签
@@ -120,4 +121,5 @@ def test_render_group_message_truncation_never_cuts_tags():
     assert len(text) <= MAX_CHARS + 40
     assert text.count("<a ") == text.count("</a>")
     assert text.count("<blockquote>") == text.count("</blockquote>")
+    assert text.count("<b>") == text.count("</b>")
     assert "#AI日报 #模型发布" in text  # 截断后页脚标签仍在

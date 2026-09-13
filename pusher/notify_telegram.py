@@ -47,9 +47,16 @@ class TelegramChannel(NotifyChannel):
 
 
 def build_instant_message(item):
-    title_link = (
-        f'<a href="{html.escape(item["url"] or "", quote=True)}">'
-        f"<b>{esc(item['title'])}</b></a>"
-    )
-    src = item["source"] + (f" · {item['tier_label']}" if item["tier_label"] else "")
-    return f"🎁 [福利] {title_link}\n　来源：{esc(src)}"
+    """即时福利消息，与日报条目同款样式：标题 → 引用块摘要 → via 来源。"""
+    lines = [f"🎁 [福利] <b>{esc(item['title'])}</b>"]
+    reason = (item.get("reason") or "").strip()
+    if reason:
+        lines.append(f"<blockquote>{esc(reason)}</blockquote>")
+    url = html.escape(item.get("url") or "", quote=True)
+    src = item.get("source") or "原文链接"
+    tier = f" · {item['tier_label']}" if item.get("tier_label") else ""
+    if url:
+        lines.append(f'via <a href="{url}">{esc(src)}</a>{esc(tier)}')
+    else:
+        lines.append(f"via {esc(src)}{esc(tier)}")
+    return "\n".join(lines)

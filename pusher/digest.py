@@ -13,8 +13,7 @@ GROUP_LABELS = [
 ]
 
 PRODUCT_LABELS = ("ai_product_update", "developer_tool", "agent_workflow")
-MAX_CHARS = 3900   # Telegram 单条消息上限 4096，留出余量
-REASON_MAX = 100   # 摘要一句话的最大长度
+MAX_CHARS = 3900   # Telegram 单条消息上限 4096，留出余量（超长按条目整体丢弃）
 
 
 def classify(item, welfare_filter):
@@ -58,24 +57,22 @@ def _footer_tags(items, group_name):
     return " ".join("#" + t for t in tags)
 
 
-def render_reason(item):
-    reason = (item.get("reason") or "").strip()
-    if len(reason) > REASON_MAX:
-        reason = reason[: REASON_MAX - 1] + "…"
-    return reason
+def render_via(item):
+    """来源行：URL 内嵌在来源名里，点击直达原文（样式参考用户提供的频道截图）。"""
+    url = html.escape(item.get("url") or "", quote=True)
+    src = item.get("source") or "原文链接"
+    tier = f" · {item['tier_label']}" if item.get("tier_label") else ""
+    if url:
+        return f'via <a href="{url}">{esc(src)}</a>{esc(tier)}'
+    return f"via {esc(src)}{esc(tier)}"
 
 
 def render_item(item, index):
-    title_link = (
-        f'<a href="{html.escape(item["url"] or "", quote=True)}">'
-        f"<b>{esc(item['title'])}</b></a>"
-    )
-    lines = [f"{index}. {title_link}"]
-    reason = render_reason(item)
+    lines = [f"{index}. <b>{esc(item['title'])}</b>"]
+    reason = (item.get("reason") or "").strip()
     if reason:
         lines.append(f"<blockquote>{esc(reason)}</blockquote>")
-    src = item["source"] + (f" · {item['tier_label']}" if item["tier_label"] else "")
-    lines.append(f"　{esc(src)}")
+    lines.append(render_via(item))
     return "\n".join(lines)
 
 

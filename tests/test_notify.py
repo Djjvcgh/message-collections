@@ -16,13 +16,13 @@ def test_build_instant_message_layout():
         "source": "AIbase",
         "tier_label": "AI垂直源",
         "url": "https://example.com/zcode-token",
+        "reason": "ZCode 推出送 token 活动",
     }
     msg = build_instant_message(item)
-    assert "🎁 [福利]" in msg
-    # 标题即链接，不再单独堆 URL 行
-    assert '<a href="https://example.com/zcode-token"><b>ZCode 送 token 限时活动开启</b></a>' in msg
-    assert "来源：AIbase · AI垂直源" in msg
-    assert msg.count("https://") == 1  # URL 只出现在 href 里
+    # 样式：标题 → 引用块摘要 → via 来源（URL 内嵌）
+    assert "🎁 [福利] <b>ZCode 送 token 限时活动开启</b>" in msg
+    assert "<blockquote>ZCode 推出送 token 活动</blockquote>" in msg
+    assert 'via <a href="https://example.com/zcode-token">AIbase</a> · AI垂直源' in msg
 
 
 class Boom(NotifyChannel):
