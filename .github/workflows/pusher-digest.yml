@@ -2,7 +2,7 @@ name: digest-push
 
 on:
   schedule:
-    - cron: "0 1,13 * * *"   # UTC 01:00 / 13:00 = 北京 09:00 / 21:00
+    - cron: "23 1,13 * * *"   # UTC 01:23 / 13:23 = 北京 09:23 / 21:23；错峰避免调度延迟
   workflow_dispatch:
     inputs:
       slot:

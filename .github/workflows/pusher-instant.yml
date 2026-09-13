@@ -2,7 +2,7 @@ name: instant-push
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # 与 radar 30 分钟更新节奏对齐
+    - cron: "13,43 * * * *"   # 每30分钟；避开整/半点，GitHub 高峰期整点任务会被大幅延迟
   workflow_dispatch:
 
 permissions:
