@@ -5,5 +5,16 @@ radar:
   # 数据年龄超过该小时数视为上游故障，本轮跳过
   max_age_hours: 36
 
-# 页面 diff 监控（M2 里程碑启用，留空即跳过）
-page_watch: []
+# 页面 diff 监控（M2）：内容变化即推送；快照存 state/pages/
+# 首次运行只落基线不推送；抓取走 r.jina.ai（渲染 JS、输出稳定），失败回退直连
+page_watch:
+  - name: deepseek-pricing
+    url: https://api-docs.deepseek.com/quick_start/pricing
+  - name: openai-pricing
+    url: https://platform.openai.com/docs/pricing
+  - name: gh-student-pack
+    url: https://education.github.com/pack
+  - name: bigmodel-pricing
+    url: https://open.bigmodel.cn/pricing
+  - name: zai-model-api
+    url: https://z.ai/model-api

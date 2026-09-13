@@ -25,6 +25,7 @@ from .notify_telegram import TelegramChannel, build_instant_message
 from .notify_wecom import WeComChannel
 from .state import State
 from .translate import is_mostly_english, translate_title
+from .watch_pages import build_page_message, check_pages
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_PATH = ROOT / "state" / "state.json"
@@ -107,6 +108,28 @@ def _translate_shown(items):
     return items
 
 
+def _run_page_watch(cfg, channels, dry_run):
+    """M2 页面 diff 监控：内容变化即推送，推送成功才更新快照。"""
+    pages = cfg.get("page_watch") or []
+    if not pages:
+        return
+    changes = check_pages(pages, STATE_PATH.parent / "pages",
+                          proxies=_outbound_proxies(), log=log)
+    if not changes:
+        return
+    log(f"page changes: {len(changes)}")
+    for change in changes:
+        message = build_page_message(change)
+        if dry_run:
+            log(message + "\n---")
+            continue
+        failed = send_all(channels, message, log=log)
+        if failed:
+            log(f"page change push failed, snapshot kept for retry: {change['name']}")
+            continue
+        change["snapshot_path"].write_text(change["snapshot_text"], encoding="utf-8")
+
+
 def run_instant(cfg, state, wf, channels, dry_run):
     data = fetch_latest_24h(cfg["radar"]["latest_24h_url"])
     ok, age = freshness(data, cfg["radar"].get("max_age_hours", 36))
@@ -129,6 +152,7 @@ def run_instant(cfg, state, wf, channels, dry_run):
         state.mark_pushed(item["url"])
     if not dry_run:
         _save_state(state)
+    _run_page_watch(cfg, channels, dry_run)
 
 
 def run_digest(cfg, state, wf, channels, dry_run, slot, settings):
