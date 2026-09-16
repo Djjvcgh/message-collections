@@ -17,5 +17,7 @@
  "da0a85713a2b0f84": "强制执行 GitHub高级安全 配置",
  "353fd77032b7c6aa": "GitHub高级安全配置现可由企业管理员跨组织强制执行，阻止组织和存储库管理员覆盖企业级设置，此前仅能限制存储库所有者更改，配置菜单提供三档强制 选项。",
  "48f0d48a555ddf12": "@ Gemini_Notebook中的新更新，供学生使用，我的2个最爱： 1 ）使用约100种语言的课堂教材进行现场口语问答2 ）随时随地录制讲座和笔记，音频笔记会自动保存到您的...",
- "12a41c6da746b790": "Show HN ：免费 WhatsApp MCP （ + UI ） ——让你的人工智能代理接入WhatsApp"
+ "12a41c6da746b790": "Show HN ：免费 WhatsApp MCP （ + UI ） ——让你的人工智能代理接入WhatsApp",
+ "25e31485609dba1b": "OpenAI 推出 ChatGPT广告新功能：赞助代理测试并集成HubSpot 与 Shopify",
+ "b3991799886eb1ad": "GitHub 更新 AI Scan for pull requests ，不再要求仓库启用 CodeQL默认设置；已启用 GitHub code scanning 的 AI Scan 的组织无需新设置便扩大覆盖，目前仅 github.com 上 GitHub Advanced Security 客户可预览， GitHub Enterprise Server 暂不支持。"
 }
