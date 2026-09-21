@@ -27,5 +27,6 @@
  "20bfcfa1f519f680": "我们正在向 Claude Code 添加对 AGENTS.md 的支持。从今天开始，在版本 2.1.277 中，如果文件夹中没有 CLAUDE.md，Claude 将检查并使用 AGENTS.md。您可以在 /config 中切换此行为。",
  "a2beae1e6b17c00b": "SpaceXAI 的Grok机器人早期测试版可登录Gmail、 LinkedIn和 Salesforce替你发邮件 ， SuperGrok需光或标付费订阅。",
  "d44fb8449ece8054": "如果您喜欢这个，请免费注册我的时事通讯，以获得我最好的人工智能和产品指南。在此加入 110,000 多名订阅者：https://t.co/yz9xcsfrhF",
- "db9f8dae1f4a525d": "Altis Labs 的 AI 模型分析肿瘤试验期间进行的 CT 扫描并生成与患者生存相关的预测，该公司已筹集了 2500 万美元的 A 轮融资（Natalie Breymeyer/Axios）"
+ "db9f8dae1f4a525d": "Altis Labs 的 AI 模型分析肿瘤试验期间进行的 CT 扫描并生成与患者生存相关的预测，该公司已筹集了 2500 万美元的 A 轮融资（Natalie Breymeyer/Axios）",
+ "7859c9898c356e54": "Kimi 发布 Kimi Code Desktop 1.0，macOS 与 Windows 版同步上线"
 }
