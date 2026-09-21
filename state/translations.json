@@ -24,5 +24,6 @@
  "78ab327b7c36e00d": "Meta的个人AI代理商Muse在苹果美国App Store的免费应用程序中排名第一，领先于ChatGPT ； Muse于9月8日推出（ Georgia Hennessy/Business Insider ）",
  "6c467e833fd850e8": "泄露的演示文稿： OpenAI预计2026年至2030年的负自由现金流为$ 2780亿，预计其收入将从今年的$ 360亿增长到2030年的$ 3500亿（金融时报）",
  "8e9030b66b8fee36": "Meta 的@Muse 是我迄今为止尝试过的最好的个人经纪人。实际上，它每年为我节省了 800 多美元的有线电视和电话费用，这对于免费的人工智能代理来说简直是疯狂的价值。这是我的新视频，其中我介绍了 10 个...",
- "20bfcfa1f519f680": "我们正在向 Claude Code 添加对 AGENTS.md 的支持。从今天开始，在版本 2.1.277 中，如果文件夹中没有 CLAUDE.md，Claude 将检查并使用 AGENTS.md。您可以在 /config 中切换此行为。"
+ "20bfcfa1f519f680": "我们正在向 Claude Code 添加对 AGENTS.md 的支持。从今天开始，在版本 2.1.277 中，如果文件夹中没有 CLAUDE.md，Claude 将检查并使用 AGENTS.md。您可以在 /config 中切换此行为。",
+ "a2beae1e6b17c00b": "SpaceXAI 的Grok机器人早期测试版可登录Gmail、 LinkedIn和 Salesforce替你发邮件 ， SuperGrok需光或标付费订阅。"
 }
