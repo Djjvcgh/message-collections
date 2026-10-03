@@ -29,7 +29,7 @@ GitHub Actions (cron 错峰调度)
 
 ▎注册即可领取，先到先得……
 
-via Linux.do 免费资源
+via NodeSeek
 ```
 
 限时窗口类情报抬头换成 `⏳ [限时]`，其余样式一致。
@@ -44,8 +44,15 @@ via Linux.do 免费资源
 | `rss` | RSS / Atom 订阅（社区板块、厂商博客、羊毛站） | `url` `name` `text_fallback` `max_age_days` |
 | `telegram` | Telegram 公开频道网页预览（无需鉴权） | `channel` `name` `proxy` |
 
-已内置：Linux.do（免费资源 / 最新）、NodeSeek、V2EX（免费赠送 / 优惠信息）、
-全球主机交流、吾爱破解、Telegram 羊毛频道、Cloudflare / GitHub 博客、HN free tier。
+已内置**实测可用**的信源（9 个启用）：NodeSeek（综合 + 福利）、V2EX 优惠信息、吾爱破解、
+Telegram `freebiesglobal` / `vpsfree`、Cloudflare Blog、GitHub Blog、AI News Radar。
+
+已停用但保留在清单里便于复核：V2EX 免费赠送（feed 为空）、全球主机交流（返回非 RSS）、
+HN free tier（SSL 不稳定）。**Linux.do 已整段移除**：它在 GitHub Actions 上返回 403
+（对数据中心 IP 封锁），本机也不可达。
+
+> 教训已写进 `config/sources.yml` 注释：**新信源必须先探测通过再启用**；
+> 频道名不能靠记忆猜（`yangmaoshe` 实测是空壳）；论坛 RSS 的版块号要逐个试。
 
 **先探测再上线**（本地或 Actions 手动触发都能跑，不推送、不写 state）：
 

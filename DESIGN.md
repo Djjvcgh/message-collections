@@ -192,7 +192,7 @@ Message Collections/
 
 ▎注册即可领取，先到先得……
 
-via Linux.do 免费资源
+via NodeSeek
 ```
 
 限时窗口类情报抬头为 `⏳ [限时]`，其余（引用块摘要、`via 来源`+原文链接）一致。
@@ -212,33 +212,40 @@ via Linux.do 免费资源
 
 ## 10. 验证记录
 
-本次改动已在本地完成验证（DSH 沙箱默认策略无法启动 shell，
-以一次性放行模式执行；`SetNamedSecurityInfoW failed (Win32 5)` 是沙箱准备阶段就失败，与仓库权限无关）：
+DSH 沙箱默认策略无法启动 shell（`SetNamedSecurityInfoW failed (Win32 5)` 发生在准备阶段，
+与仓库权限无关），本次以一次性放行模式执行全部验证：
 
 | 验证项 | 结果 |
 |---|---|
 | `python -m pytest -q` | **73 passed** |
-| `python -m pusher.run --probe --only nodeseek` | OK，20 条 |
-| `python -m pusher.run --probe`（全量） | 7/13 可用，明细见下 |
+| `python -m pusher.run --probe`（仅启用源） | **9/9 可用** |
 | 已下线文件删除 | 已 `git rm`，工作区干净 |
+| 提交 | 已 rebase 到 Actions 的 state 提交之上并推送 main |
 
-信源实测明细（2026-10-03，**本机网络**）：
+信源实测明细（2026-10-03，本机 + GitHub Actions 双向验证）：
 
-| 信源 | 结果 | 说明 |
-|---|---|---|
-| radar | ✅ 201 条 | 上游健康 |
-| nodeseek | ✅ 20 条 | |
-| v2ex-deals | ✅ 39 条 | |
-| 52pojie | ✅ 7 条 | |
-| tg-freebies | ✅ 20 条 | |
-| tg-vpsfree | ✅ 22 条 | 新增，替代实测为空壳的 yangmaoshe |
-| cloudflare-blog / github-blog | ✅ 20 / 5 条 | |
-| linux.do（两个源） | ❌ 不可达 | 本机连 `curl` 都连接超时，属网络环境问题，非站点故障 |
-| v2ex-free | ⚠️ 空 | 返回 200 但 0 字节 Atom，待 Actions 复核 |
-| hostloc | ⚠️ HTML | 返回 HTML 而非 RSS，待 Actions 复核 |
-| hn-free-tier | ⚠️ 空 | feed 有效，当前无匹配条目 |
+| 信源 | 本机 | Actions | 结论 |
+|---|---|---|---|
+| radar | ✅ 201 条 | — | 启用（上游健康） |
+| nodeseek | ✅ 20 条 | 待首批日志 | 启用 |
+| nodeseek-free | ✅ 20 条 | 待首批日志 | 启用（新增） |
+| v2ex-deals | ✅ 49 条 | 待首批日志 | 启用 |
+| 52pojie | ✅ 7 条 | 待首批日志 | 启用 |
+| tg-freebies | ✅ 20 条 | 待首批日志 | 启用 |
+| tg-vpsfree | ✅ 22 条 | 待首批日志 | 启用（新增，替代空壳的 yangmaoshe） |
+| cloudflare-blog | ✅ 20 条 | 待首批日志 | 启用 |
+| github-blog | ✅ 5 条 | 待首批日志 | 启用 |
+| linux.do（两个源） | ❌ 连接超时 | ❌ **403 Forbidden** | **移除**：对数据中心 IP 封锁 |
+| v2ex-free | ⚠️ 0 字节 | ⚠️ 0 条 | 停用：feed 无效 |
+| hostloc | ⚠️ 返回 HTML | ⚠️ 0 条 | 停用：非 RSS |
+| hn-free-tier | ❌ SSL 断连 | ⚠️ 0 条 | 停用：不稳定且长期无命中 |
+| tg-yangmaoshe / zaihua / yanggou / baipiao | ❌ 空壳 | — | 已删/未启用 |
 
-**待办**：Actions 首次运行后手动触发一次 `probe=true`，按日志把仍抓不到的源改成 `enabled: false`。
+**教训**：
+1. 中文社区站对 Actions 的数据中心 IP 不一定友好（linux.do 直接 403），
+   **信源必须先 probe 再上线**，这条流程已写进 `config/sources.yml` 的注释。
+2. 频道名不能靠记忆猜（`yangmaoshe` 是空壳），Telegram 源必须探测消息块数量。
+3. 论坛类 RSS 常按版块给 feed，版块号要逐个试（52pojie 只有 2/16/41/42 有内容）。
 
 ```bash
 # 本地复现验证

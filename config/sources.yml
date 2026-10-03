@@ -6,6 +6,7 @@
 #   telegram —— Telegram 公开频道网页预览（telegram 选项 channel / name / limit / proxy）
 #
 # enabled: false 的信源会被跳过，但保留在清单里方便回看与恢复。
+# 新增信源的标准流程：先 python -m pusher.run --probe --only <id> 通过，再启用到正常轮次。
 sources:
   # --- AI 资讯（原主源，现降为普通信源之一）---
   - id: radar
@@ -15,51 +16,55 @@ sources:
       max_age_hours: 36
 
   # --- 中文社区板块：白嫖服务器 / 免费域名 / 限时活动的主产地 ---
-  # 注意：这几个站（尤其 linux.do）会对境外/受限网络重置连接，
-  # 本地探测若整站不可达属正常现象，以 GitHub Actions 上的 --probe 结果为准。
-  # 2026-10-03 本机实测：nodeseek 20 条可用；v2ex 优惠信息 39 条可用；
-  # 52pojie 7 条可用；v2ex 免费赠送与 hostloc 返回空/HTML（待 Actions 复核）。
-  - id: linuxdo-free
-    type: rss
-    options:
-      url: https://linux.do/c/free-stuff/13.rss
-      name: Linux.do 免费资源
-      # Discourse 的 description 可能是纯文本正文，不做 HTML 反转义
-      text_fallback: true
-  - id: linuxdo-latest
-    type: rss
-    options:
-      url: https://linux.do/latest.rss
-      name: Linux.do 最新
-      text_fallback: true
   - id: nodeseek
     type: rss
     options:
       url: https://www.nodeseek.com/rss.xml
       name: NodeSeek
-  - id: v2ex-free
+  - id: nodeseek-free
     type: rss
     options:
-      url: https://www.v2ex.com/feed/tab/free.xml
-      name: V2EX 免费赠送
+      url: https://www.nodeseek.com/rss.xml?f=7
+      name: NodeSeek 福利
   - id: v2ex-deals
     type: rss
     options:
       url: https://www.v2ex.com/feed/tab/deals.xml
       name: V2EX 优惠信息
-  - id: hostloc
-    type: rss
-    options:
-      url: https://hostloc.com/forum.php?mod=rss&fid=45
-      name: 全球主机交流
   - id: 52pojie
     type: rss
     options:
       url: https://www.52pojie.cn/forum.php?mod=rss&fid=2
       name: 吾爱破解
+  # 注：52pojie 的 freeshare 版（fid=7/26/40/52）实测 RSS 为空，不可用，
+  # 已验证可用的版块是 fid=2/16/41/42（fid=2 即当前配置）。
+
+  # 以下三个源 2026-10-03 实测不适合作为生产源，已停用（保留清单便于复核）：
+  # v2ex 免费赠送返回 0 字节 Atom；hostloc 返回 HTML 而非 RSS；
+  # linux.do 在 Actions 上 403 Forbidden（对数据中心 IP 的封锁），已整段移除。
+  - id: v2ex-free
+    type: rss
+    enabled: false
+    options:
+      url: https://www.v2ex.com/feed/tab/free.xml
+      name: V2EX 免费赠送
+  - id: hostloc
+    type: rss
+    enabled: false
+    options:
+      url: https://hostloc.com/forum.php?mod=rss&fid=45
+      name: 全球主机交流
+  # hnrss.org 在本机与 CI 均出现 SSL 断连（EOF in violation of protocol），
+  # 且当日查询长期 0 命中，收益不足，停用。
+  - id: hn-free-tier
+    type: rss
+    enabled: false
+    options:
+      url: https://hnrss.org/newest?q=free+tier
+      name: HN free tier
 
   # --- Telegram 公开频道：羊毛信息最快的一手来源 ---
-  # 频道名必须在本地/CI 探测通过才算数（2026-10-03 实测：yangmaoshe 为空壳，已删）
+  # 频道名必须在 CI/本地探测通过才算数（2026-10-03：yangmaoshe 为空壳，已删）
   - id: tg-freebies
     type: telegram
     options:
@@ -71,6 +76,28 @@ sources:
     options:
       channel: vpsfree
       name: VPS Free
+      limit: 20
+  # 待探测的候选频道，通过后再删掉 enabled: false
+  - id: tg-freebie
+    type: telegram
+    enabled: false
+    options:
+      channel: freebie
+      name: Freebie
+      limit: 20
+  - id: tg-giveaway
+    type: telegram
+    enabled: false
+    options:
+      channel: giveaway
+      name: Giveaway
+      limit: 20
+  - id: tg-freenet
+    type: telegram
+    enabled: false
+    options:
+      channel: freenet
+      name: FreeNet
       limit: 20
 
   # --- 境外厂商 / 聚合站：免费额度、free tier、促销 ---
@@ -84,8 +111,3 @@ sources:
     options:
       url: https://github.blog/feed/
       name: GitHub Blog
-  - id: hn-free-tier
-    type: rss
-    options:
-      url: https://hnrss.org/newest?q=free+tier
-      name: HN free tier
