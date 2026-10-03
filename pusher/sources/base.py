@@ -22,6 +22,10 @@ class Item:
     score: float = 0.0
     signals: List[str] = field(default_factory=list)
     extra: dict = field(default_factory=dict)
+    # 摘要是否参与关键词匹配。资讯聚合类信源（radar）的摘要常是整篇文章，
+    # 撞词概率极高（TechCrunch 门票、Meta 开源都会命中「免费/优惠」），
+    # 这类源只按标题判定；RSS 社区源保持 True，用短摘要兜底。
+    match_summary: bool = True
 
     @property
     def reason(self) -> str:
@@ -62,6 +66,7 @@ def as_item(raw):
         score=float(raw.get("score") or 0.0),
         signals=list(raw.get("signals") or []),
         extra=dict(raw.get("extra") or {}),
+        match_summary=bool(raw.get("match_summary", True)),
     )
 
 

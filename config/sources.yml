@@ -14,6 +14,9 @@ sources:
     options:
       url: https://news.learnprompt.pro/data/latest-24h.json
       max_age_hours: 36
+      # 它的摘要常是整篇资讯正文，撞词极多（TechCrunch 门票、Meta 开源都会
+      # 命中「免费/优惠」），所以只按标题判定；需要摘要兜底时改 true
+      match_summary: false
 
   # --- 中文社区板块：白嫖服务器 / 免费域名 / 限时活动的主产地 ---
   - id: nodeseek

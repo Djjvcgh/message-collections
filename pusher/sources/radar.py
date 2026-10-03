@@ -18,6 +18,9 @@ class RadarSource:
             raise ValueError("radar 信源需要 options.url")
         self.max_age_hours = float(options.get("max_age_hours", 36))
         self.limit = int(options.get("limit", 0))
+        # radar 的推荐理由是整段资讯摘要，撞词极多（TechCrunch 门票、Meta 开源
+        # 都会命中「免费/优惠」），默认只按标题判定；需要摘要兜底时配 true
+        self.match_summary = bool(options.get("match_summary", False))
 
     def fetch(self, log=print, **ctx):
         data = fetch_latest_24h(self.url)
@@ -30,6 +33,7 @@ class RadarSource:
             # normalize() 把 radar 的中文推荐理由放在 reason 里，
             # Item 的统一摘要字段是 summary，这里显式搬运，避免推送时摘要空白
             raw["summary"] = raw.get("reason") or ""
+            raw["match_summary"] = self.match_summary
             item = as_item(raw)
             item.source_id = self.id
             items.append(item)

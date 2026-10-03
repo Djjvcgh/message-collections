@@ -331,6 +331,7 @@ class RssSource:
         self.timeout = int(options.get("timeout", 20))
         self.limit = int(options.get("limit", 0))
         self.max_age_days = float(options.get("max_age_days", DEFAULT_MAX_AGE_DAYS))
+        self.match_summary = bool(options.get("match_summary", True))
 
     def fetch(self, log=print, proxies=None, **ctx):
         text = fetch_feed_text(self.url, timeout=self.timeout, proxies=proxies)
@@ -342,6 +343,8 @@ class RssSource:
             text_fallback=self.text_fallback,
             source_id=self.id,
         )
+        for item in items:
+            item.match_summary = self.match_summary
         items = self._drop_old(items)
         if self.limit:
             items = items[: self.limit]

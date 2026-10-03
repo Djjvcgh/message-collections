@@ -44,13 +44,14 @@ welfare_keywords:
   - free vps
   - free hosting
   - giveaway
-  - coupon
   - promo code
   - discount
   - credits
   - student
   - trial
   - half price
+  # 注意：coupon 已移除。2026-10-03 实测它在 Telegram 免费课频道里
+  # 连续命中 20 条正文（每篇正文都带 coupon 促销话术），全是误报。
 
 # 限时窗口型情报：不是送东西，但错过就没了（如开放注册、限时领取资格）
 opportunity_keywords:
@@ -82,8 +83,11 @@ opportunity_keywords:
 
 # 排除词：标题/摘要命中即跳过（调优误报时改这里）
 # 注意：这里拒绝的是「看起来很福利、实际是噪音」的条目。
-# 已知调优结论：deal 独立成词会命中大量收购新闻（见 tests/test_filter.py），不要加回。
-# discount 命中率尚可但歧义大，若观察期误报多，优先删它。
+# 已知调优结论：
+#   - deal 独立成词会命中大量收购新闻（见 tests/test_filter.py），不要加回
+#   - coupon 同理（免费课正文必带），已从词表删除
+#   - discount / 免费 / free 这几个宽词的误报由「摘要门槛 120 字」兜底，
+#     若观察期仍偏多，按实测报告逐个收紧
 exclude_words:
   - 广告
   - 广告位
@@ -95,3 +99,7 @@ exclude_words:
   - 抽奖
   - 薅羊毛群
   - sponsored
+  # 课程类：Udemy 等平台的长文促销，福利价值低且极易刷屏
+  - udemy
+  - 优惠券码
+  - 课程优惠

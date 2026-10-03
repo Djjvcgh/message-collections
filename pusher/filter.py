@@ -17,8 +17,25 @@ from .state import title_key
 KIND_WELFARE = "welfare"
 KIND_OPPORTUNITY = "opportunity"
 
-# 摘要超过这个长度视为正文，不参与关键词匹配（RSS 常把全文塞进 description）
-MAX_REASON_CHARS = 300
+# 摘要超过这个长度视为整篇文章正文，不参与关键词匹配。
+# 实测（2026-10-03 真实信源）：门槛从 300 收到 120，命中从 51 条降到 24 条，
+# 丢掉的全是「TechCrunch 门票 / 二手耳机 / Udemy 课程」这类正文撞词，
+# 真福利（折扣券、免费额度、开放注册）都在标题或短摘要里命中。
+MAX_REASON_CHARS = 120
+
+# 中文短语替换：正文说「某人免费开放了代码」≠ 读者能领福利。
+# 标题/摘要里出现这些说法时先抹掉，避免 免费/赠送 被蹭。
+_BENIGN_PHRASES = (
+    "免费课",
+    "免费公开课",
+    "免费讲座",
+    "免费直播",
+    "开源免费",
+    "免费开放代码",
+    "免费开放",
+    "免费试用报告",
+)
+_PHRASE_MASK = "〇"
 
 
 def _get(item, field, default=""):
@@ -38,12 +55,25 @@ def head_fields(item):
     ]
 
 
+def mask_benign(parts):
+    """抹掉已知的「看着像福利其实不是」说法，避免宽词被蹭。"""
+    out = []
+    for part in parts:
+        text = part or ""
+        for phrase in _BENIGN_PHRASES:
+            text = text.replace(phrase, _PHRASE_MASK)
+        out.append(text)
+    return out
+
+
 def text_fields(item):
     """标题 + 短摘要：摘要过长（整篇正文）时丢弃，避免误报。"""
     reason = _get(item, "reason")
-    if len(reason) > MAX_REASON_CHARS:
+    if not _get(item, "match_summary", True):
         reason = ""
-    return head_fields(item) + [reason]
+    elif len(reason) > MAX_REASON_CHARS:
+        reason = ""
+    return mask_benign(head_fields(item)) + [reason]
 
 
 def text_blob(parts):
@@ -106,13 +136,12 @@ class WelfareFilter:
 
     def classify(self, item):
         """返回 'welfare' / 'opportunity'，不命中返回 None。"""
-        head = head_fields(item)
         parts = text_fields(item)
         if self._excluded(parts):
             return None
-        if self.welfare.matches(head) or self.welfare.matches(parts):
+        if self.welfare.matches(parts):
             return KIND_WELFARE
-        if self.opportunity.matches(head) or self.opportunity.matches(parts):
+        if self.opportunity.matches(parts):
             return KIND_OPPORTUNITY
         return None
 

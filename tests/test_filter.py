@@ -86,15 +86,45 @@ def test_english_plural_tolerated():
     assert wf.match(make_item("", "student discount program"))
 
 
-def test_summary_matched_only_when_title_is_clean():
+def test_summary_matched_only_when_short():
+    """短摘要可兜底；整篇正文长度（>120 字）不参与匹配。"""
     wf = WelfareFilter(["免费"], ["名额"])
-    # 长摘要是整篇正文，不参与匹配（RSS 常见）
     body = "本文讨论 AI 安全。" * 60 + "文末提到可免费领取"
     assert not wf.match(make_item("AI 安全讨论", summary=body))
-    # 短摘要可作为兜底
     assert wf.match(make_item("某活动上线", summary="前 100 名免费领取"))
-    # 标题命中摘要不干净也照推
+    # 标题命中时摘要多长都照推
     assert wf.match(make_item("免费额度上线", summary=body))
+
+
+def test_match_summary_can_be_disabled_per_item():
+    """资讯聚合类信源的摘要是整篇文章，可按条目关闭摘要匹配。"""
+    wf = WelfareFilter(["免费"])
+    noisy = as_item(
+        {
+            "title": "OpenAI 发布新 agent 平台",
+            "summary": "文中提到该平台免费开放给企业",
+            "match_summary": False,
+        }
+    )
+    assert not wf.match(noisy)
+    # 同一段摘要在允许匹配时（RSS 社区源默认行为）仍可兜底
+    loose = as_item(
+        {
+            "title": "OpenAI 发布新 agent 平台",
+            "summary": "文中提到该平台免费开放给企业",
+        }
+    )
+    assert wf.match(loose)
+
+
+def test_benign_phrases_do_not_count_as_welfare():
+    """「免费公开课」「免费开放代码」是描述别人的行为，不是读者能领的福利。"""
+    wf = WelfareFilter(["免费"])
+    assert not wf.match(make_item("我开了一门免费公开课"))
+    assert not wf.match(make_item("Meta 把 Muse 免费开放"))
+    assert not wf.match(make_item("某项目开源免费了"))
+    # 真福利不受影响
+    assert wf.match(make_item("免费领取 1 年域名"))
 
 
 def test_long_summary_excluded_from_matching():
@@ -124,6 +154,8 @@ def test_keywords_config_is_usable():
     opportunity = {k.strip().lower() for k in cfg["opportunity_keywords"]}
     # 调优结论：deal 在独立成词时会命中大量收购新闻，禁止进入词表
     assert "deal" not in welfare
+    # coupon 同理：2026-10-03 在 Telegram 免费课频道连中 20 条正文
+    assert "coupon" not in welfare
     assert len(cfg["opportunity_keywords"]) >= 10
     assert "开放注册" in opportunity
     assert "免费域名" in {k.strip().lower() for k in cfg["welfare_keywords"]}
