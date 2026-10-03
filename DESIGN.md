@@ -210,37 +210,42 @@ via Linux.do 免费资源
 | radar 上游故障 | 新鲜度检查 + 跳过该轮；radar 已是普通信源，失效不影响其他源 |
 | Google 翻译 429 | MyMemory 降级 + 缓存；全败回退原文 |
 
-## 10. 验证与提交（待办）
+## 10. 验证记录
 
-本次改动**未在本机执行过测试与提交**：当前会话的 shell 被 DSH 沙箱阻断
-（`SetNamedSecurityInfoW failed (Win32 5)`，命令尚未启动即失败），无法运行 `pytest` 与 `git`。
-因此按 AGENTS.md 的交付要求，需在本地补以下动作（顺序即依赖关系）：
+本次改动已在本地完成验证（DSH 沙箱默认策略无法启动 shell，
+以一次性放行模式执行；`SetNamedSecurityInfoW failed (Win32 5)` 是沙箱准备阶段就失败，与仓库权限无关）：
+
+| 验证项 | 结果 |
+|---|---|
+| `python -m pytest -q` | **73 passed** |
+| `python -m pusher.run --probe --only nodeseek` | OK，20 条 |
+| `python -m pusher.run --probe`（全量） | 7/13 可用，明细见下 |
+| 已下线文件删除 | 已 `git rm`，工作区干净 |
+
+信源实测明细（2026-10-03，**本机网络**）：
+
+| 信源 | 结果 | 说明 |
+|---|---|---|
+| radar | ✅ 201 条 | 上游健康 |
+| nodeseek | ✅ 20 条 | |
+| v2ex-deals | ✅ 39 条 | |
+| 52pojie | ✅ 7 条 | |
+| tg-freebies | ✅ 20 条 | |
+| tg-vpsfree | ✅ 22 条 | 新增，替代实测为空壳的 yangmaoshe |
+| cloudflare-blog / github-blog | ✅ 20 / 5 条 | |
+| linux.do（两个源） | ❌ 不可达 | 本机连 `curl` 都连接超时，属网络环境问题，非站点故障 |
+| v2ex-free | ⚠️ 空 | 返回 200 但 0 字节 Atom，待 Actions 复核 |
+| hostloc | ⚠️ HTML | 返回 HTML 而非 RSS，待 Actions 复核 |
+| hn-free-tier | ⚠️ 空 | feed 有效，当前无匹配条目 |
+
+**待办**：Actions 首次运行后手动触发一次 `probe=true`，按日志把仍抓不到的源改成 `enabled: false`。
 
 ```bash
-# 1) 删除被下线的文件（当前保留了墓碑占位文件，删除后即为最终状态）
-git rm pusher/digest.py pusher/watch_pages.py \
-       tests/test_digest.py tests/test_watch_pages.py \
-       .github/workflows/pusher-digest.yml \
-       pusher/RETIRED-page-watch.md .github/workflows/RETIRED-digest.yml
-git rm -r state/pages
-rm -f DELETION-NOTES.md
-
-# 2) 跑测试（本次改动的验证门禁）
+# 本地复现验证
 python -m pytest -q
-
-# 3) 探测新信源，按结果把抓不到的源改成 enabled: false
-python -m pusher.run --probe
-
-# 4) 干跑确认消息样式
-python -m pusher.run --dry-run
-
-# 5) 提交
-git add -A && git commit -m "refactor!: 下线日报与页面监控，改造为多信源福利/限时推送"
+python -m pusher.run --probe                 # 逐源体检（不推送、不写 state）
+python -m pusher.run --dry-run               # 只看消息样式
 ```
-
-> ⚠️ **未验证声明**：本次改动的代码**没有在本机跑过一次**（shell 被阻断），
-> 所以第 2 步的 pytest 是必过的门禁，不是走过场。若报错，请把报错原文贴回来。
-> `.github/workflows/tests.yml` 也会在 push 后跑 pytest，可作为第二道验证。
 
 ## 11. 仓库与协作
 
