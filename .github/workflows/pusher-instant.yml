@@ -2,8 +2,17 @@ name: instant-push
 
 on:
   schedule:
-    - cron: "13,43 * * * *"   # 每30分钟；避开整/半点，GitHub 高峰期整点任务会被大幅延迟
+    - cron: "13,43 * * * *"   # 每 30 分钟；避开整/半点，GitHub 高峰期整点任务会被大幅延迟
   workflow_dispatch:
+    inputs:
+      probe:
+        description: "只探测信源可用性，不推送（true/false）"
+        default: "false"
+        type: string
+      only:
+        description: "只跑指定信源 id（逗号分隔，留空表示全部）"
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -15,7 +24,7 @@ concurrency:
 jobs:
   push:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15          # 多源串行采集，留足余量
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,12 +33,25 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Probe sources
+        if: ${{ inputs.probe == 'true' }}
+        run: |
+          set -euo pipefail
+          arg=""
+          if [ -n "${{ inputs.only }}" ]; then arg="--only ${{ inputs.only }}"; fi
+          python -m pusher.run --probe $arg
       - name: Push welfare hits
+        if: ${{ inputs.probe != 'true' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m pusher.run instant
+        run: |
+          set -euo pipefail
+          arg=""
+          if [ -n "${{ inputs.only }}" ]; then arg="--only ${{ inputs.only }}"; fi
+          python -m pusher.run $arg
       - name: Commit state
+        if: ${{ inputs.probe != 'true' }}
         run: |
           git config user.name "pusher-bot"
           git config user.email "actions@users.noreply.github.com"
@@ -37,6 +59,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "state unchanged"
           else
-            git commit -m "state: instant $(date -u '+%Y-%m-%d %H:%M') UTC"
+            git commit -m "state: push $(date -u '+%Y-%m-%d %H:%M') UTC"
             git push
           fi

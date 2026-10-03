@@ -1,11 +1,12 @@
-# 福利词表：命中任一关键词即触发即时推送（匹配时忽略空白与大小写）
+# 福利词表：命中即触发即时推送（匹配时忽略空白与大小写）
 welfare_keywords:
   - 免费额度
   - 限时免费
+  - 永久免费
   - 免费
   - 白嫖
-  - 赠送
   - 白送
+  - 赠送
   - 送token
   - 送额度
   - 送会员
@@ -17,23 +18,80 @@ welfare_keywords:
   - 半价
   - 学生
   - 教育优惠
+  - 校园
   - 试用
   - 领取
   - 补贴
+  - 优惠码
+  - 兑换码
+  - 免费域名
+  - 免费服务器
+  - 免费主机
+  - 免费小鸡
+  - 免费vps
+  - 免费证书
+  - 免费ssl
+  - 免费邮箱
+  - 免费api
+  - 开源版
+  - 内测资格
+  - 公测
   - free tier
-  - free
-  - credits
-  - promo
-  - discount
-  - student
+  - free credits
+  - free trial
+  - free plan
+  - free domain
+  - free vps
+  - free hosting
   - giveaway
   - coupon
+  - promo code
+  - discount
+  - credits
+  - student
   - trial
   - half price
 
-# 排除词：标题命中即跳过（调优误报时改这里）
+# 限时窗口型情报：不是送东西，但错过就没了（如开放注册、限时领取资格）
+opportunity_keywords:
+  - 开放注册
+  - 开放申请
+  - 限时
+  - 限量
+  - 名额
+  - 先到先得
+  - 截止
+  - 报名
+  - 申领
+  - 资格
+  - 抽签
+  - 排队
+  - 今日开放
+  - 即将结束
+  - 最后一天
+  - 涨价
+  - 即将收费
+  - 停止免费
+  - ends soon
+  - limited time
+  - limited spots
+  - early access
+  - waitlist
+  - sign up
+  - registration open
+
+# 排除词：标题/摘要命中即跳过（调优误报时改这里）
+# 注意：这里拒绝的是「看起来很福利、实际是噪音」的条目。
+# 已知调优结论：deal 独立成词会命中大量收购新闻（见 tests/test_filter.py），不要加回。
+# discount 命中率尚可但歧义大，若观察期误报多，优先删它。
 exclude_words:
   - 广告
   - 广告位
   - 推广
+  - 返利
+  - 邀请码互助
+  - 每日签到
+  - 签到领
+  - 抽奖
+  - 薅羊毛群
   - sponsored
