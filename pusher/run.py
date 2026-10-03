@@ -18,6 +18,7 @@ from pathlib import Path
 import yaml
 
 from .filter import KIND_OPPORTUNITY, KIND_WELFARE, WelfareFilter, dedupe
+from .facts import is_actionable
 from .notify_base import send_all
 from .notify_email import EmailChannel
 from .notify_telegram import TelegramChannel, build_instant_message
@@ -199,9 +200,13 @@ def run_once(
     classified = []
     for item in fresh:
         kind = wf.classify(item)
-        if kind:
-            item.extra["kind"] = kind
-            classified.append(item)
+        if not kind:
+            continue
+        # 交易/灌水比例高的社区源：必须含明确优惠信息才推，否则噪声远多于价值
+        if item.require_actionable and not is_actionable(item):
+            continue
+        item.extra["kind"] = kind
+        classified.append(item)
     log(
         f"hits: {len(classified)} "
         f"(welfare {sum(1 for i in classified if i.extra['kind'] == KIND_WELFARE)}, "

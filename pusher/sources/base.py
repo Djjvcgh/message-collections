@@ -26,6 +26,12 @@ class Item:
     # 撞词概率极高（TechCrunch 门票、Meta 开源都会命中「免费/优惠」），
     # 这类源只按标题判定；RSS 社区源保持 True，用短摘要兜底。
     match_summary: bool = True
+    # 是否要求「含明确优惠信息」才推。交易/灌水比例高的社区源（V2EX 优惠信息）
+    # 打开它，只放行带折扣码/兑换券/免费额度这类硬信息的帖子。
+    require_actionable: bool = False
+    # 展示体裁：bullets（默认，细节行 + 摘要）或 facts_only（只给抽出的硬信息，
+    # 不倒原始正文）。论坛/社区类信源的正文常是一整段流水账，用 facts_only。
+    layout: str = "bullets"
 
     @property
     def reason(self) -> str:
@@ -67,6 +73,8 @@ def as_item(raw):
         signals=list(raw.get("signals") or []),
         extra=dict(raw.get("extra") or {}),
         match_summary=bool(raw.get("match_summary", True)),
+        require_actionable=bool(raw.get("require_actionable", False)),
+        layout=raw.get("layout") or "bullets",
     )
 
 

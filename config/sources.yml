@@ -19,21 +19,35 @@ sources:
       match_summary: false
 
   # --- 中文社区板块：白嫖服务器 / 免费域名 / 限时活动的主产地 ---
+  # NodeSeek 实测以二手交易与闲聊为主（求推荐 VPS / 出机器 / 收机器），
+  # 与「福利」目标不符，默认停用；需要时把 enabled 改回 true 并打开 require_actionable。
   - id: nodeseek
     type: rss
+    enabled: false
     options:
       url: https://www.nodeseek.com/rss.xml
       name: NodeSeek
+      require_actionable: true
+      layout: facts_only
   - id: nodeseek-free
     type: rss
+    enabled: false
     options:
       url: https://www.nodeseek.com/rss.xml?f=7
       name: NodeSeek 福利
+      require_actionable: true
+      layout: facts_only
   - id: v2ex-deals
     type: rss
     options:
       url: https://www.v2ex.com/feed/tab/deals.xml
       name: V2EX 优惠信息
+      # 该版以二手交易/闲聊为主，实测 49 条里只有 9 条含明确优惠信息，
+      # 打开后只放行带折扣码/兑换券/免费额度这类硬信息的帖子
+      require_actionable: true
+      # 帖子正文是一整段没有句末标点的流水账（还混着签名与网址），
+      # 倒出来没法读也压不掉，改为只给抽出的硬信息
+      layout: facts_only
   - id: 52pojie
     type: rss
     options:

@@ -19,9 +19,54 @@ def test_build_instant_message_layout():
         "reason": "ZCode 推出送 token 活动",
     }
     msg = build_instant_message(item)
-    # 样式：标题 → 空行 → 引用块摘要 → 空行 → via 来源（URL 内嵌）
-    assert "🎁 [福利] <b>ZCode 送 token 限时活动开启</b>\n\n<blockquote>" in msg
-    assert "</blockquote>\n\nvia <a href=\"https://example.com/zcode-token\">AIbase</a> · AI垂直源" in msg
+    # 样式：标题行 → 引用块摘要 → via 来源（URL 内嵌），逐行紧凑排列
+    assert "🎁 [福利] <b>ZCode 送 token 限时活动开启</b>\n<blockquote>" in msg
+    assert "</blockquote>\nvia <a href=\"https://example.com/zcode-token\">AIbase</a> · AI垂直源" in msg
+
+
+def test_build_instant_message_renders_detail_lines():
+    """抽到硬信息时按行列出；摘要里已有的项不重复占行。"""
+    item = {
+        "title": "AdGuard Family Plan 终身订阅优惠",
+        "source": "V2EX 优惠信息",
+        "url": "https://example.com/adguard",
+        "summary": "折扣码：LIFETIMEO 最终到手价：￥59.20 CNY",
+    }
+    msg = build_instant_message(item)
+    assert "▎价格：<b>￥59.20</b>（到手价）" in msg
+    assert "▎折扣码：LIFETIMEO" in msg
+    assert msg.index("▎价格") < msg.index("via <a")
+
+
+def test_build_instant_message_detail_line_rescues_code_from_long_summary():
+    """长摘要会被压缩，券码可能被压掉——这时靠细节行把它拎出来。"""
+    long_body = (
+        "几年以前我在 V2EX 发过这个工具的第一版，当时是基于 SSH 协议做的内网穿透，"
+        "这几年陆续更新了不少东西，节点从早期单节点扩展到多地区，域名的 SSL 证书集成得更完整，"
+        "凭兑换券码 NWY-CIYUM-4UYZD-40694 到平台仪表盘兑换，先到先得。"
+    )
+    item = {
+        "title": "内网云 2026 国庆活动余额兑换券",
+        "source": "V2EX 优惠信息",
+        "url": "https://example.com/nwy",
+        "summary": long_body,
+    }
+    msg = build_instant_message(item)
+    assert "▎折扣码：NWY-CIYUM-4UYZD-40694" in msg
+    assert "▎价格" not in msg  # 没有价格就不占行
+
+
+def test_short_summary_dedupes_price_but_keeps_code_line():
+    """摘要里已出现的信息不重复占行，但折扣码例外（强制单独成行便于扫到）。"""
+    item = {
+        "title": "内网云国庆活动余额兑换券",
+        "source": "V2EX 优惠信息",
+        "url": "https://example.com/nwy",
+        "summary": "兑换券码：NWY-CIYUM-4UYZD-40694 先到先得",
+    }
+    msg = build_instant_message(item)
+    assert "▎折扣码：NWY-CIYUM-4UYZD-40694" in msg
+    assert "▎价格" not in msg
 
 
 class Boom(NotifyChannel):

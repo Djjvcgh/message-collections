@@ -3,13 +3,14 @@
 GitHub Actions 上直连 api.telegram.org；本地调试可通过
 TELEGRAM_PROXY 环境变量走代理（如 http://127.0.0.1:7897）。
 
-渲染目标（可读性优先，宁缺毋滥）：
-- **标题完整**：换行的推文/论坛帖先合并成一句，长度按标点边界收口，绝不切断词语。
-- **摘要倒金字塔**：拆句后按信息密度重排 —— 含价格/折扣/名额/截止日的句子优先，
-  其次是首句，最后是背景补充；预算不够时整句丢弃，不切半句。
-- **关键数字加粗**：价格、折扣、日期在正文里加粗，扫一眼就能看到。
-- **速览行**：抽出的价格/截止时间 + 来源 + 发布时间放最后一行。
-- **预算**：正文预算约 350 字（不含标签），长内容按句压缩，短内容不硬凑。
+消息体裁（2026-10-03 按实际观感重做）：
+- **标题**：一句完整的事件陈述；换行的推文/论坛帖先合并，去掉源站冗余标记
+  与转发腔调；过长或残缺时用信源自带摘要重做标题。
+- **细节行**：把折扣码、价格、截止、资格、形式逐行列出（`▎价格：…`），
+  抽不到的行不占位。这一层是「一眼能用」的信息，优先于叙述。
+- **摘要**：只放细节行没覆盖到的句子，长段落压缩，短内容不硬凑。
+- **速览行**：`via 来源 · 截止 · 时间`，抽不到就不显示。
+- **预算**：正文约 350 字，超长先砍摘要、再砍细节行。
 """
 import html
 import re
@@ -17,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+from .facts import extract_facts, is_actionable  # noqa: F401 — is_actionable 供 run 调用
 from .notify_base import NotifyChannel
 
 API = "https://api.telegram.org"
@@ -34,6 +36,22 @@ TITLE_SOFT_LIMIT = 140       # 超过这个长度就算「长标题」，改用�
 HEADLINE_LIMIT = 110         # 重做后的标题长度上限
 MIN_REASON_FOR_HEADLINE = 20  # 摘要短于这个长度就不足以当标题
 FIRST_SENTENCE_BONUS = 6
+MAX_DETAIL_LINES = 5         # 细节行上限，避免比正文还长
+
+# 标题开头的方括号标记（【福利】【免费赠送】【慢讯】…）：信息量低，去掉
+_BRACKET_TAG = re.compile(r"^\s*[\[【（(][^\]】)）]{1,12}[\]】)）]\s*")
+# 方括号里属于「活动性质说明」的词，无脑去掉
+_TAG_NOISE = re.compile(
+    r"^(?:福利|免费赠送|免费送|限时|优惠|活动|分享|推荐|慢讯|快讯|重磅|首发|搬运|转发|"
+    r"抽奖|开源|教程|求助|讨论|提问|已结束)$"
+)
+
+# 叙事/评论腔调的开头：资讯类摘要常写成「想知道…读这篇」「我试用了…」，
+# 这类句子对「一眼看懂发生了什么」没有帮助，只在摘要里剔除（标题另有规则）。
+_NARRATIVE = re.compile(
+    r"^(?:想知道|感兴趣的话|感兴趣的可以|值得一读|值得读|这篇内容值得|"
+    r"如果你|我试用了|我试了|作者称|作者表示|原文还|读这篇)"
+)
 
 # 改写：去掉信源自带的转发腔调，让标题直接说事（只动语气词，不动事实）
 _TITLE_REWRITES = (
@@ -112,11 +130,26 @@ def _get(item, field, default=""):
 # ---------------------------------------------------------------- 标题处理
 
 def normalize_title(raw):
-    """把多行/带标记的标题整理成一句完整的话，并去掉转发腔调。"""
+    """把多行/带标记的标题整理成一句完整的话。
+
+    实测场景：V2EX 的 `[免费赠送] 内网云 2026 国庆活动余额兑换券` 会和我们自己的
+    `🎁 [福利]` 叠成两套标记，所以源标题开头的方括号活动标记要逐个去掉；
+    但若整条标题都由标记构成，则保留原样，不能清空。
+    """
     text = re.sub(r"<[^>]+>", " ", raw or "")
     text = html.unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"[\s·…\.]+$", "", text)
+
+    stripped = text
+    while True:
+        match = _BRACKET_TAG.match(stripped)
+        if not match:
+            break
+        stripped = stripped[match.end():]
+    if stripped.strip():
+        text = stripped.strip()
+
     for pattern, repl in _TITLE_REWRITES:
         text = pattern.sub(repl, text)
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
@@ -255,18 +288,7 @@ def build_summary(text, budget, keep_order=False):
     return " ".join(sentence for _, sentence in picked)
 
 
-# ---------------------------------------------------------------- 速览信息
-
-def extract_facts(*texts):
-    """从标题/摘要里抽出价格与截止时间；抽不到留空（不硬凑）。"""
-    blob = " ".join(t for t in texts if t)
-    price = _PRICE.search(blob)
-    deadline = _DEADLINE.search(blob)
-    return {
-        "price": price.group(0).strip() if price else "",
-        "deadline": deadline.group(0).strip() if deadline else "",
-    }
-
+# ---------------------------------------------------------------- 高亮
 
 def highlight(text):
     """给正文里的价格与日期加粗（先转义再加标签，避免破坏 HTML）。"""
@@ -311,32 +333,74 @@ def format_published(item):
 def build_instant_message(item, kind="welfare", budget=DEFAULT_BUDGET):
     """组装一条即时消息。
 
-    结构：`抬头 + 标题` → 引用块摘要（关键数字加粗）→ 速览行（价格/截止/来源/时间）。
-    摘要按预算压缩、整句取舍；与标题重复的句子会被去掉（标题本身已用摘要重做时，
-    摘要常常就是同一句话，重复展示纯属浪费版面）；抽不到价格与截止时间就不显示。
+    结构：`抬头 + 标题` → 细节行（▎价格 / ▎折扣码 / ▎截止 …）→ 尾部摘要 → 速览行。
+    细节行是「一眼能用」的硬信息，优先保证；摘要只放细节行没覆盖到的句子；
+    预算不够时先砍摘要、再砍细节行，标题永不砍。
     """
     header = KIND_HEADERS.get(kind, DEFAULT_HEADER)
     title = build_title(item)
     url = html.escape(_get(item, "url") or "", quote=True)
     src = _get(item, "source") or "原文链接"
     tier_label = _get(item, "tier_label")
+    facts_only = _get(item, "layout") == "facts_only"
 
-    # 预算：先扣标题与速览行的开销，其余留给摘要
-    footer_cost = len(src) + 14 + (len(tier_label) + 3 if tier_label else 0)
-    summary_budget = budget - len(title) - footer_cost
+    # 预留速览行开销，其余给细节行与摘要
+    footer_cost = len(src) + 16 + (len(tier_label) + 3 if tier_label else 0)
+    body_budget = max(budget - len(title) - footer_cost, 0)
+
     reason = (_get(item, "reason") or _get(item, "summary") or "").strip()
+    facts = extract_facts(f"{title} {reason}")
+    squeezed_title = _squeeze(title)
+    fresh = [(label, value) for label, value in facts if _squeeze(value) not in squeezed_title]
+
+    # 1) 尾部摘要（facts_only 模式不倒正文：论坛帖子整段流水账既读不下去也压不掉）
     summary = ""
-    if reason and summary_budget >= MIN_SUMMARY_BUDGET:
-        rest = drop_repeated(reason, title)
+    if not facts_only and reason and body_budget >= MIN_SUMMARY_BUDGET:
+        covered = " ".join([title] + [value for _, value in fresh])
+        rest = drop_repeated(reason, covered)
+        rest = drop_narrative(rest)
         if rest:
-            summary = build_summary(rest, summary_budget)
+            summary = build_summary(rest, body_budget)
+
+    # 2) 细节行：把摘要里没交代的硬信息单独列出。
+    #    折扣码是「这条消息最该被看到的东西」，即使摘要里也出现过，也强制单独占一行
+    #    （摘要会被压缩，码混在长段落里很难扫到）；其余项重复则不占行。
+    squeezed_summary = _squeeze(summary)
+    detail_lines = []
+    for label, value in fresh:
+        squeezed_value = _squeeze(value)
+        if label != "折扣码" and squeezed_value and squeezed_value in squeezed_summary:
+            continue
+        if len(detail_lines) >= MAX_DETAIL_LINES:
+            break
+        line = f"▎{label}：{highlight(value)}"
+        if sum(len(x) for x in detail_lines) + len(line) > body_budget:
+            break
+        detail_lines.append(line)
 
     lines = [f"{header} <b>{esc(title)}</b>"]
+    lines.extend(detail_lines)
     if summary:
         lines.append(f"<blockquote>{highlight(summary)}</blockquote>")
 
-    facts = extract_facts(title, reason)
-    meta = [v for v in (facts["price"], facts["deadline"]) if v]
+    # 3) 速览行：只放还没出现过的信息（细节行里已有的价格/截止不重复）
+    shown = _squeeze(" ".join(detail_lines).replace("<b>", "").replace("</b>", ""))
+    meta = []
+    deadline = next((v for label, v in facts if label == "截止"), "")
+    if deadline and _squeeze(deadline) not in shown and _squeeze(deadline) not in _squeeze(summary):
+        meta.append(deadline)
+    price = next((v for label, v in facts if label == "价格"), "")
+    price_key = _squeeze(price.split("（")[0])   # 「¥59.20（到手价）」→「¥59.20」
+    if price_key and price_key not in shown and price_key not in _squeeze(summary):
+        meta.append(price)
+    # 速览行自身也要去重：截止与价格抽到同一串时不重复列出
+    deduped, seen_meta = [], set()
+    for value in meta:
+        key = _squeeze(value)
+        if key and key not in seen_meta:
+            seen_meta.add(key)
+            deduped.append(value)
+    meta = deduped
     stamp = format_published(item)
     if stamp:
         meta.append(stamp)
@@ -346,7 +410,7 @@ def build_instant_message(item, kind="welfare", budget=DEFAULT_BUDGET):
     if meta:
         tail += " · " + esc(" · ".join(meta))
     lines.append(tail)
-    return "\n\n".join(lines)
+    return "\n".join(lines)
 
 
 def drop_repeated(reason, headline):
@@ -356,6 +420,12 @@ def drop_repeated(reason, headline):
     key = _squeeze(headline)
     kept = [s for s in split_sentences(reason) if _squeeze(s) not in key]
     return " ".join(kept)
+
+
+def drop_narrative(reason):
+    """剔除纯评论腔调的句子（「想知道…读这篇」），它们不传达事件本身。"""
+    kept = [s for s in split_sentences(reason) if not _NARRATIVE.match(s.strip())]
+    return " ".join(kept) if kept else (reason or "")
 
 
 def _squeeze(text):

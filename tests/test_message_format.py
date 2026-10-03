@@ -1,11 +1,11 @@
 """消息渲染的用例：标题清洗、摘要重排、关键数字高亮、速览行、长度预算。"""
+from pusher.facts import extract_facts, is_actionable
 from pusher.notify_telegram import (
     DEFAULT_BUDGET,
     build_instant_message,
     build_summary,
     build_title,
     drop_repeated,
-    extract_facts,
     format_published,
     highlight,
     normalize_title,
@@ -140,15 +140,36 @@ def test_highlight_escapes_before_adding_tags():
 
 
 def test_extract_facts_finds_price_and_deadline():
-    facts = extract_facts("某活动", "Expo+ Pass 只要 $75，原文提醒 Oct 2 是最后一天。")
-    assert facts["price"] == "$75"
-    assert facts["deadline"]
+    facts = dict(extract_facts("某活动 Expo+ Pass 只要 $75，原文提醒 10月2日 是最后一天。"))
+    assert facts["价格"] == "$75"
+    assert facts["截止"]
+
+
+def test_extract_facts_prefers_final_price():
+    facts = dict(extract_facts("原价 ￥74.00，折扣码：LIFETIMEO，最终到手价 ￥59.20"))
+    assert "59.20" in facts["价格"]
+    assert "到手价" in facts["价格"]
+    assert facts["折扣码"] == "LIFETIMEO"
+
+
+def test_extract_facts_requires_label_for_codes():
+    """裸匹配会把型号/日期/单号当成折扣码，所以只认带标签的。"""
+    facts = dict(extract_facts("出 H11SSL-NC 主板，单号 1086110586937，日期 20270930"))
+    assert "折扣码" not in facts
 
 
 def test_extract_facts_returns_empty_when_absent():
-    facts = extract_facts("普通标题", "普通摘要，没有价格也没有期限。")
-    assert facts["price"] == ""
-    assert facts["deadline"] == ""
+    assert extract_facts("普通标题 普通摘要，没有价格也没有期限。") == []
+
+
+def test_actionable_filter_drops_secondhand_and_requests():
+    assert not is_actionable(make(title="【出】出懒猫云LazyCat优惠码及机器", summary="26元 折扣"))
+    assert not is_actionable(make(title="求推荐香港 CN2 原生机房 VPS", summary="有没有优惠的"))
+    assert not is_actionable(make(title="收 berohost", summary=""))
+    assert is_actionable(
+        make(title="内网云国庆活动余额兑换券", summary="兑换券码：NWY-CIYUM-4UYZD-40694 先到先得")
+    )
+    assert is_actionable(make(title="AdGuard 终身订阅", summary="折扣码：LIFETIMEO 最终到手价 ￥59.20"))
 
 
 def test_format_published_today_and_recent():
@@ -194,7 +215,8 @@ def test_message_without_summary_still_renders():
     item = make(title="免费域名活动", summary="")
     msg = build_instant_message(item)
     assert "<blockquote>" not in msg
-    assert msg.count("\n\n") == 1
+    # 只有标题行与速览行两行，中间不留空段
+    assert msg.count("\n") == 1
 
 
 def test_short_summary_is_not_padded():
