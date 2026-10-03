@@ -1,0 +1,204 @@
+"""消息渲染的用例：标题清洗、摘要重排、关键数字高亮、速览行、长度预算。"""
+from pusher.notify_telegram import (
+    DEFAULT_BUDGET,
+    build_instant_message,
+    build_summary,
+    build_title,
+    drop_repeated,
+    extract_facts,
+    format_published,
+    highlight,
+    normalize_title,
+    score_sentence,
+    split_sentences,
+)
+from pusher.sources.base import as_item
+
+
+def make(**kw):
+    base = {"title": "", "url": "https://x.com/1", "source": "NodeSeek", "summary": ""}
+    base.update(kw)
+    return as_item(base)
+
+
+# ---------------------------------------------------------------- 标题
+
+def test_title_joins_wrapped_lines_and_strips_markup():
+    item = make(title="某云赠送\n3 个月    免费服务器<br/>先到先得")
+    title = build_title(item)
+    # 换行与多余空白被合并，HTML 标签被剥掉，中文之间的空格收紧
+    assert "\n" not in title
+    assert "<br/>" not in title
+    assert "某云赠送 3 个月免费服务器先到先得" == title
+
+
+def test_title_join_keeps_space_for_latin_words():
+    # 英文之间必须保留空格，否则单词会粘在一起
+    assert build_title(make(title="Cloudflare\nfree tier raised")) == "Cloudflare free tier raised"
+
+
+def test_title_drops_forwarding_tone():
+    assert build_title(make(title="我试用了 Gemini 免费的新工具")) == "Gemini 免费的新工具"
+    assert build_title(make(title="别错过这个 75 美元的优惠")) == "75 美元的优惠"
+    assert build_title(make(title="重磅！某活动开启")) == "某活动开启"
+
+
+def test_short_title_is_untouched():
+    title = "某活动发放 75 美元优惠，名额 100 个"
+    assert build_title(make(title=title)) == title
+
+
+def test_long_tweet_title_is_rebuilt_from_summary():
+    """实测场景：X 推文标题 200+ 字且被上游截断，改用摘要重做标题。"""
+    item = make(
+        title="Anthropic 的工程师说：我们内部已经不怎么写 prompt 了，写的是循环。 她在台上花了半小时，"
+              "展示了 Claude 团队如何创建能够自我提示的循环。 如果这堂课卖 400 刀，今年 Agent 课的榜单"
+              "大概就是它。但它是免费的。 真正拉开代际差距的，不是谁的 Prompt 写得…",
+        summary="Anthropic 工程师用半小时展示 Claude 团队如何创建自我提示的循环，称内部已不写 prompt；"
+                "这堂价值 400 刀的 Agent 课免费，讲记忆从 CLAUDE.md 变成 Agent 自己读写的 memory/。",
+    )
+    title = build_title(item)
+    assert len(title) <= 110
+    assert title.startswith("Anthropic 工程师用半小时展示")
+    assert "…" not in title          # 收口落在句末标点上，不留悬空省略号
+
+
+def test_long_title_without_summary_trims_at_sentence_end():
+    item = make(title="第一句话讲完了。第二句话非常长" + "继续铺垫" * 40, summary="")
+    title = build_title(item)
+    assert title.endswith("。")
+    assert len(title) <= 140
+
+
+def test_title_falls_back_to_english_title():
+    assert build_title(make(title="", title_en="Free tier raised")) == "Free tier raised"
+
+
+# ---------------------------------------------------------------- 摘要
+
+def test_split_sentences_keeps_punctuation():
+    assert split_sentences("第一句。第二句！第三句？") == ["第一句。", "第二句！", "第三句？"]
+
+
+def test_split_sentences_breaks_long_run_on_commas():
+    text = "没有句号的一段话，" * 20
+    parts = split_sentences(text)
+    assert len(parts) > 1
+    assert all(len(p) <= 140 for p in parts)
+
+
+def test_summary_puts_price_sentence_first():
+    """倒金字塔：含价格的句子优先，但最终仍按原文顺序输出保证连贯。"""
+    reason = "某活动开始了。参与方式很简单。价格只要 $75，限前 100 名。"
+    out = build_summary(reason, 200)
+    assert "$75" in out
+    # 原文顺序保留：价格句仍在最后
+    assert out.index("某活动开始了") < out.index("$75")
+
+
+def test_summary_drops_low_value_sentences_when_budget_is_tight():
+    reason = "开场白一句。真正的福利只要 $75。补一句没用的。" * 3
+    out = build_summary(reason, 40)
+    assert "$75" in out
+    assert len(out) <= 40
+
+
+def test_summary_never_cuts_a_sentence_in_half():
+    reason = "甲" * 30 + "。" + "乙" * 30 + "。"
+    out = build_summary(reason, 40)
+    assert out in ("甲" * 30 + "。", "乙" * 30 + "。") or out == "甲" * 30 + "。"
+
+
+def test_summary_empty_when_budget_too_small():
+    assert build_summary("有内容。", 0) == ""
+
+
+def test_drop_repeated_removes_sentence_already_in_headline():
+    headline = "某云赠送 3 个月免费服务器"
+    rest = drop_repeated("某云赠送 3 个月免费服务器。另有 5 折优惠码。", headline)
+    assert rest == "另有 5 折优惠码。"
+
+
+def test_score_prefers_hard_information():
+    hard = score_sentence("价格只要 $75，限前 100 名。", 2)
+    soft = score_sentence("参与方式很简单。", 2)
+    assert hard > soft
+
+
+# ---------------------------------------------------------------- 高亮与速览
+
+def test_highlight_bolds_prices_and_dates():
+    out = highlight("只要 $75，10月2日 截止")
+    assert "<b>$75</b>" in out
+    assert "<b>10月2日</b>" in out
+
+
+def test_highlight_escapes_before_adding_tags():
+    out = highlight("A & B 只要 $5")
+    assert "&amp;" in out
+    assert "<b>$5</b>" in out
+
+
+def test_extract_facts_finds_price_and_deadline():
+    facts = extract_facts("某活动", "Expo+ Pass 只要 $75，原文提醒 Oct 2 是最后一天。")
+    assert facts["price"] == "$75"
+    assert facts["deadline"]
+
+
+def test_extract_facts_returns_empty_when_absent():
+    facts = extract_facts("普通标题", "普通摘要，没有价格也没有期限。")
+    assert facts["price"] == ""
+    assert facts["deadline"] == ""
+
+
+def test_format_published_today_and_recent():
+    from datetime import datetime, timedelta, timezone
+
+    from pusher.notify_telegram import BJT
+
+    now = datetime.now(BJT)
+    assert format_published(make(extra={"published": now.isoformat()})).startswith("今天")
+    three_days = now - timedelta(days=3)
+    assert format_published(make(extra={"published": three_days.isoformat()}))[:5].count("-") == 1
+    old = now - timedelta(days=30)
+    assert format_published(make(extra={"published": old.isoformat()})) == ""
+    assert format_published(make(extra={"published": "坏数据"})) == ""
+
+
+# ---------------------------------------------------------------- 组装
+
+def test_message_layout_and_budget():
+    item = make(
+        title="某云赠送 3 个月免费服务器",
+        summary="注册即可领取。原价 30 美元，现在免费。名额限前 100 名，截止 10月2日。",
+        source="NodeSeek",
+        tier_label="热议参考",
+        extra={"published": "2026-09-01T00:00:00+00:00"},
+    )
+    msg = build_instant_message(item, kind="welfare")
+    assert msg.startswith("🎁 [福利] <b>某云赠送 3 个月免费服务器</b>")
+    assert "<blockquote>" in msg
+    assert 'via <a href="https://x.com/1">NodeSeek</a> · 热议参考' in msg
+    visible = msg.replace("<b>", "").replace("</b>", "").replace("<blockquote>", "").replace("</blockquote>", "")
+    assert len(visible) <= DEFAULT_BUDGET + 30
+
+
+def test_message_omits_summary_when_it_repeats_title():
+    item = make(title="Minisforum 工作站限时预购价 7399 美元", summary="Minisforum 工作站限时预购价 7399 美元。")
+    msg = build_instant_message(item, kind="opportunity")
+    assert "⏳ [限时]" in msg
+    assert "<blockquote>" not in msg
+
+
+def test_message_without_summary_still_renders():
+    item = make(title="免费域名活动", summary="")
+    msg = build_instant_message(item)
+    assert "<blockquote>" not in msg
+    assert msg.count("\n\n") == 1
+
+
+def test_short_summary_is_not_padded():
+    """内容本来就短，不硬凑到 350 字。"""
+    item = make(title="折扣券", summary="三折券 40r。")
+    msg = build_instant_message(item)
+    assert len(msg) < 120
