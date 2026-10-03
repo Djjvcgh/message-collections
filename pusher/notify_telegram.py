@@ -150,9 +150,20 @@ def normalize_title(raw):
     if stripped.strip():
         text = stripped.strip()
 
-    for pattern, repl in _TITLE_REWRITES:
-        text = pattern.sub(repl, text)
+    # 逐轮剥离：剥掉「受裁员影响？」后，「别错过这个」才会露出来成为新的开头
+    for _ in range(4):
+        changed = False
+        for pattern, repl in _TITLE_REWRITES:
+            new_text = pattern.sub(repl, text)
+            if new_text != text:
+                text = new_text
+                changed = True
+        if not changed:
+            break
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    # 半角逗号/冒号夹在汉字之间是源站排版习惯（「优惠,9 设备永久授权」），
+    # 转发到 Telegram 观感差，换成中文标点
+    text = re.sub(r"(?<=[\u4e00-\u9fff])[,;:](?=[\u4e00-\u9fff0-9])", "，", text)
     text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", text)
     return text.strip()
 
@@ -353,9 +364,12 @@ def build_instant_message(item, kind="welfare", budget=DEFAULT_BUDGET):
     squeezed_title = _squeeze(title)
     fresh = [(label, value) for label, value in facts if _squeeze(value) not in squeezed_title]
 
-    # 1) 尾部摘要（facts_only 模式不倒正文：论坛帖子整段流水账既读不下去也压不掉）
+    # 1) 尾部摘要。两种情况不再展示：
+    #    facts_only 不倒正文；标题本身就是这段摘要改写的（长标题场景）也不重复——
+    #    否则用户看到的会是同一句话说两遍。
     summary = ""
-    if not facts_only and reason and body_budget >= MIN_SUMMARY_BUDGET:
+    reason_is_headline = bool(reason) and _squeeze(reason) == _squeeze(title.replace("…", ""))
+    if not facts_only and not reason_is_headline and reason and body_budget >= MIN_SUMMARY_BUDGET:
         covered = " ".join([title] + [value for _, value in fresh])
         rest = drop_repeated(reason, covered)
         rest = drop_narrative(rest)
@@ -383,8 +397,12 @@ def build_instant_message(item, kind="welfare", budget=DEFAULT_BUDGET):
     if summary:
         lines.append(f"<blockquote>{highlight(summary)}</blockquote>")
 
-    # 3) 速览行：只放还没出现过的信息（细节行里已有的价格/截止不重复）
-    shown = _squeeze(" ".join(detail_lines).replace("<b>", "").replace("</b>", ""))
+    # 3) 速览行：只放还没出现过的信息
+    #    比对范围包含标题——例：标题写「60 元」、细节行给「¥59.20（到手价）」时，
+    #    速览行不该再把金额列第三遍
+    shown = _squeeze(
+        " ".join(detail_lines).replace("<b>", "").replace("</b>", "") + " " + title
+    )
     meta = []
     deadline = next((v for label, v in facts if label == "截止"), "")
     if deadline and _squeeze(deadline) not in shown and _squeeze(deadline) not in _squeeze(summary):
