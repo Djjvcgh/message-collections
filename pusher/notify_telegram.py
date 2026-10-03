@@ -30,8 +30,11 @@ KIND_HEADERS = {
     "opportunity": "⏳ [限时]",
 }
 DEFAULT_HEADER = "🎁 [福利]"
-DEFAULT_BUDGET = 350
-MIN_SUMMARY_BUDGET = 60      # 摘要至少留这么多字，否则还不如不写
+# 正文预算：用户反馈「摘要太简短、前因后果不明，必须点原文」，
+# 350 字放不下完整来龙去脉，放宽到 600；短内容依然不硬凑。
+DEFAULT_BUDGET = 600
+MIN_SUMMARY_BUDGET = 120     # 摘要至少留这么多字，否则宁可不要这段
+MAX_SUMMARY_SOURCE = 600     # 摘要参与展示的原文上限（关键词匹配另有更严的门槛）
 TITLE_SOFT_LIMIT = 140       # 超过这个长度就算「长标题」，改用摘要重做标题
 HEADLINE_LIMIT = 110         # 重做后的标题长度上限
 MIN_REASON_FOR_HEADLINE = 20  # 摘要短于这个长度就不足以当标题
@@ -255,34 +258,54 @@ def split_sentences(text):
 
 
 def score_sentence(sentence, index):
-    """信息密度打分：价格/期限/资格等硬信息优先，其次是靠前的句子。"""
+    """信息密度打分：硬信息与前因后果优先，评论腔与铺垫句降权。
+
+    目标是让摘要「不点原文也能看懂」：先交代发生了什么（含价格/名额/期限），
+    再补起因、影响与官方说法。
+    """
     score = 0
     if index == 0:
-        score += FIRST_SENTENCE_BONUS
+        score += FIRST_SENTENCE_BONUS             # 原文首句通常是导语
     if _PRICE.search(sentence):
-        score += 10
+        score += 10                               # 价格/折扣
     if _DEADLINE.search(sentence):
-        score += 8
+        score += 8                                # 期限
     if re.search(r"(?:免费|赠送|折扣|优惠|领取|注册|申请|名额|限量|资格)", sentence):
-        score += 6
-    if re.search(r"(?:官方|announced|确认|回应|宣布)", sentence, re.I):
-        score += 4
+        score += 6                                # 领取动作与条件
+    if re.search(r"(?:因为|由于|原因是|起因|之所以|受.{0,12}影响|得益于|为应对)", sentence):
+        score += 6                                # 前因
+    if re.search(r"(?:官方|announced|确认|回应|宣布|表示|称)", sentence, re.I):
+        score += 4                                # 官方说法
+    if re.search(r"(?:原来|此前|去年|历史上|首次|一度|早就|曾经|相比|对比之下)", sentence):
+        score += 3                                # 历史背景
+    if re.search(r"(?:意味着|将影响|结果|导致|后续|接下来|库存|售罄|结束)", sentence):
+        score += 3                                # 影响与结果
     if re.search(r"\d", sentence):
         score += 2
     if len(sentence) < 12:
-        score -= 4          # 太短的碎片信息量低
-    if len(sentence) > 200:
-        score -= 2
-    score -= index * 0.5    # 原文顺序本身就是一种重要性信号
+        score -= 4                                # 碎片，信息量低
+    if len(sentence) > 300:
+        score -= 3                                # 一整段，读起来累
+    score -= index * 0.5                          # 原文顺序本身就是重要性信号
     return score
 
 
 def build_summary(text, budget, keep_order=False):
-    """按信息密度重排句子并压到预算内；整句取舍，不切半句。"""
+    """按信息密度挑选句子并压到预算内；整句取舍，不切半句。
+
+    评论腔（「想知道…读这篇」）整句丢弃；选完后恢复原文顺序，
+    读起来仍是「发生了什么 → 起因 → 影响」的自然推进。
+    """
     sentences = split_sentences(text)
     if not sentences or budget <= 0:
         return ""
-    ranked = list(enumerate(sentences))
+    ranked = [
+        (index, sentence)
+        for index, sentence in enumerate(sentences)
+        if not _NARRATIVE.match(sentence.strip())   # 评论腔不占版面
+    ]
+    if not ranked:
+        ranked = list(enumerate(sentences))
     if not keep_order:
         ranked.sort(key=lambda pair: -score_sentence(pair[1], pair[0]))
     picked, used = [], 0
@@ -296,7 +319,10 @@ def build_summary(text, budget, keep_order=False):
         return _trim_at_boundary(sentences[0], budget)
     if not keep_order:
         picked.sort(key=lambda pair: pair[0])   # 选完恢复原文顺序，读起来才连贯
-    return " ".join(sentence for _, sentence in picked)
+    joined = " ".join(sentence for _, sentence in picked)
+    # 拼接处：中文标点前不留空格，句子之间保留一个空格
+    joined = re.sub(r"\s+([，。；、！？])", r"\1", joined)
+    return joined
 
 
 # ---------------------------------------------------------------- 高亮
@@ -360,6 +386,8 @@ def build_instant_message(item, kind="welfare", budget=DEFAULT_BUDGET):
     body_budget = max(budget - len(title) - footer_cost, 0)
 
     reason = (_get(item, "reason") or _get(item, "summary") or "").strip()
+    if len(reason) > MAX_SUMMARY_SOURCE:
+        reason = _trim_at_boundary(reason, MAX_SUMMARY_SOURCE, prefer_sentence=True)
     facts = extract_facts(f"{title} {reason}")
     squeezed_title = _squeeze(title)
     fresh = [(label, value) for label, value in facts if _squeeze(value) not in squeezed_title]

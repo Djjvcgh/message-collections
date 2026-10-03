@@ -103,6 +103,29 @@ def test_summary_drops_low_value_sentences_when_budget_is_tight():
     assert len(out) <= 40
 
 
+def test_summary_keeps_context_when_budget_allows():
+    """预算够时要保留起因、背景与官方说法，让读者不必点原文。"""
+    text = (
+        "最近云服务市场又有新动作。想知道这家新秀值不值得上手，读这篇就够了。"
+        "X 云宣布新用户注册即可免费领取 100 元额度，名额限前 500 名，活动截止 10月15日。"
+        "之所以推出这轮补贴，是因为年底前要冲开发者规模。"
+        "此前该平台在 2024 年也做过类似活动，当时额度只有 50 元。"
+        "官方表示这次会分批放量。"
+    )
+    out = build_summary(text, 600)
+    assert "100 元额度" in out          # 事实
+    assert "之所以推出这轮补贴" in out    # 起因
+    assert "2024 年" in out              # 历史背景
+    assert "官方表示" in out              # 官方说法
+    assert "想知道" not in out            # 评论腔剔除
+
+
+def test_score_rewards_cause_and_background():
+    cause = score_sentence("之所以推出这轮补贴，是因为年底要冲规模。", 3)
+    flat = score_sentence("参与方式很简单。", 3)
+    assert cause > flat
+
+
 def test_summary_never_cuts_a_sentence_in_half():
     reason = "甲" * 30 + "。" + "乙" * 30 + "。"
     out = build_summary(reason, 40)

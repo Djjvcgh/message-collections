@@ -165,6 +165,24 @@ def test_keywords_config_is_usable():
     assert {"抽奖", "每日签到"} <= exclude
 
 
+def test_bare_generic_words_are_not_in_keywords():
+    """裸词「免费 / 试用 / credits」是误报主因，词表里不允许出现。"""
+    cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    welfare = {k.strip().lower() for k in cfg["welfare_keywords"]}
+    assert "免费" not in welfare          # 实测 8 条含「免费」的里 7 条是误报
+    assert "试用" not in welfare          # 「我试用了 Gemini…」是评测文
+    assert "credits" not in welfare       # 「每月含 400 万 credits」是订阅介绍
+    assert {"免费领取", "免费试用", "免费发放", "免费域名"} <= welfare
+
+    wf = WelfareFilter(cfg["welfare_keywords"], [])
+    assert not wf.match(make_item("我试用了 Gemini 免费的新电影制作工具；好莱坞没什么好担心的"))
+    assert not wf.match(make_item("Meta 开源代码，让你打造 Muse AI 小硬件"))
+    assert not wf.match(make_item("别再猜哪个 AI 最强了：不到 100 美元就能用上 GPT 和 Claude"))
+    # 真能领的仍要命中
+    assert wf.match(make_item("新用户注册即可免费领取 100 元额度"))
+    assert wf.match(make_item("某站发放免费额度，先到先得"))
+
+
 def test_dedupe_collapses_same_title_from_two_sources():
     a = make_item("NodeSeek：某某免费域名活动开始")
     b = make_item("某某免费域名活动开始")
