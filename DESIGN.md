@@ -1,9 +1,13 @@
 # 情报推送器 · 设计方案
 
-> 版本 v0.5 · 2026-10-03
-> 本版为**减法 + 拓源**：删掉日报层与页面 diff 监控，只保留福利/限时情报推送，
-> 并把单一主源改造为多信源聚合。
-> 实施状态：代码已改完，**待本地验证与提交**（见第 10 节「验证与提交」）。
+> 版本 v0.6 · 2026-10-05
+> 本版是**内容与精度**修复：消息必须有正文、噪音必须进不来、【限时】通道恢复，
+> 并把「为什么没推」变成可观测的数字（`--report`）。
+> 上一版 v0.5 是减法 + 拓源（删掉日报层与页面 diff 监控，单主源改多信源聚合）。
+>
+> **本版核心发现（实测，见 4.6 节）**：线上 47.5 小时只推了 3 条，而这 3 条**全是噪音**；
+> 修复后同一批信源里噪音全部被拦下，剩下暴露出来的是**真供给本身稀疏**——
+> 这不是放宽筛选能解决的，只能靠信源扩充 + 可观测性（`--report` 与候选体检工具）持续调。
 
 ## 1. 背景与目标
 
@@ -73,13 +77,16 @@
 | `rss` | `sources/feed.py` | 社区板块、厂商博客、羊毛站点的 RSS/Atom |
 | `telegram` | `sources/telegram.py` | `t.me/s/<channel>` 公开频道网页预览，无需鉴权 |
 
-已接入清单（`config/sources.yml`）：
+已接入清单（`config/sources.yml`，2026-10-05 复核）：
 
-- **中文社区**：V2EX 优惠信息（`require_actionable` + `facts_only`）、吾爱破解
+- **中文社区**：V2EX 优惠信息（`require_actionable` + `facts_only`）、
+  **V2EX 免费赠送节点 feed**（`/feed/free.xml`，`require_actionable`，`max_age_days: 7`）、吾爱破解
+- **境外免费版块**：**Reddit 免费版块**（freebies/eFreebies/AppHookup/freegames/GameDealsFree/
+  FreeGameFindings/FreeEBOOKS 合并为一个 feed，一次请求，`max_age_days: 3`）
 - **Telegram 频道**：Freebies Global、VPS Free
-- **境外**：Cloudflare Blog、GitHub Blog
+- **境外厂商**：Cloudflare Blog、GitHub Blog
 - **AI 资讯**：AI News Radar（`match_summary: false`）
-- **已停用**：NodeSeek（实测以二手交易与闲聊为主）、v2ex-free（feed 为空）、
+- **已停用并复核**：NodeSeek 与 NodeSeek 福利、吾爱破解 16/41/42（各 20 条 0 命中）、
   hostloc（非 RSS）、HN free tier（SSL 不稳定）
 - **已移除**：Linux.do（Actions 实测 403）
 
@@ -97,26 +104,52 @@
 
 ### 3.4 上线前必须探测
 
-信源可用性无法靠猜（各家反爬策略不同），所以提供探测模式：
+信源可用性无法靠猜（各家反爬策略不同），所以提供两层探测：
 
 ```bash
 python -m pusher.run --probe                  # 逐源报告：OK/FAILED、条数、样例标题+链接
 python -m pusher.run --probe --only nodeseek  # 只测一个源
+python probe/probe_candidates.py              # 候选信源体检：抓取量 + 命中量双闸门 + 样例
 ```
 
 Actions 手动触发也支持 `probe=true`（不推送、不写 state）。
-**新增信源的标准流程：先 probe 通过，再进正常轮次。**
+**新增信源的标准流程：先用 `probe_candidates.py` 通过双闸门并人工看过样例，再进正常轮次。**
+机械闸门不够——`tg-freebie` 满足「抓取 ≥5 且命中 ≥1」，但 12/20 条是加密空投（详见第 10 节）。
 
 ## 4. 推送策略
 
-### 4.1 命中判定（两层词表）
+### 4.1 命中判定（两层词表 + 证据闸门）
 
-- `config/keywords.yml` 里 `welfare_keywords` 与 `opportunity_keywords` 两张词表
-- 中文词在去空白文本上做子串匹配（`送 token` ≡ `送token`）
-- 英文词用词边界匹配并容忍复数（`student` 命中 `students`，但不命中 `industrial`）
-- 匹配范围：标题(中/英) + 信号词 + 短摘要；超过 300 字的摘要视为正文，不参与匹配
-- `exclude_words` 优先级最高，命中即整条丢弃
-- 同时命中两类词表时按**福利**处理（信息量更大）
+`config/keywords.yml` 四张表 + 三个证据谓词（`pusher/facts.py`）：
+
+| 表 / 谓词 | 作用 |
+|---|---|
+| `welfare_keywords` | **硬福利词**，命中即成立（免费额度、赠送、折扣码、兑换券、free credits……） |
+| `weak_welfare_keywords` | **宽词**（优惠、折扣、福利、学生、免费使用、student、discount……）：单独出现**不算**福利，必须与「硬福利证据」共现 |
+| `opportunity_keywords` / `weak_opportunity_keywords` | 限时窗口；宽词要求有可领取动作或窗口证据 |
+| `has_offer_signal` | 硬证据：折扣码/兑换券/免费领取/半价/`N 折`/`% off`/到手价+金额…… |
+| `has_claim_signal` | 可领取动作：领取/申请/注册/报名/兑换/邀请码/sign up |
+| `has_window_signal` | 窗口：截止/限量/名额/先到先得/最后 N 天/开放注册 |
+
+判定顺序（`WelfareFilter.explain`，只有这一处实现，`classify` 与 `--report` 共用）：
+
+```
+排除词 → 公告已作废（领完/送完/过期）→ 硬福利 → 宽福利（需硬证据）
+      → 硬限时 → 宽限时（需可领取）→ 派生限时（硬证据 + 窗口）→ 不推
+```
+
+- 匹配范围：标题(中/英) + 信号词 + 短摘要（≤ `filter.max_reason_chars`，默认 120 字）。
+  **宽词不匹配 `title_en`**：实测英文标题里的 students 会把 AI 行业新闻整条捞进来。
+- **证据类判定走「裁剪视图」**（`matching_item`）：`match_summary: false` 或摘要过长时，
+  摘要不参与任何证据判定——否则整篇文章会绕过正文门槛蹭中弱词与派生限时。
+- **摘要同样过屏蔽层**：此前只屏蔽标题，摘要里的「This giveaway has ended」
+  照样能让 giveaway 命中（实测漏网）。
+- **否定语境方向敏感**：`将结束…免费`、`不再免费`、`免费使用…终止`、`恢复原价`、
+  `优惠码作废`、`giveaway … ended` 先抹掉；但 `限时免费领取，月底结束` 是截止预告，
+  不能被误伤（正反例都在语料里）。
+- **二手/索要守卫**：`优惠价出一个 X`、`联系 tg @xxx`、`求推荐/收 X`、
+  `有大哥能送个会员吗` 全部拒掉；`免费送出 100 个兑换码` 反过来必须放行。
+- 同时命中两类时按**福利**处理（信息量更大）。
 
 ### 4.2 去重
 
@@ -141,10 +174,65 @@ Actions 手动触发也支持 `probe=true`（不推送、不写 state）。
 - 降级链：Google gtx → MyMemory → 保留原文；任一失败静默降级，不阻塞推送
 - 缓存：`state/translations.json` 按标题哈希缓存，同一标题只译一次
 
+### 4.5 正文保障（用户第一条反馈）
+
+用户反馈原话：「消息内容缺乏摘要，信息量太少」。实测根因有三层，所以修也是三层：
+
+1. **源数据丢了正文**：`fetch_radar.normalize` 只映射 `recommend_reason_zh`，丢掉了上游
+   `summary` 与 `published_at`。实测线上 112 条 radar 里 `summary` 非空 23 条、
+   `recommend_reason_zh` 非空 75 条，**89 条（79%）两个字段都空**，
+   用随附的 `data/latest-24h-all.json` 按 id/url 回捞能补回 **0 条**。
+   → 修：映射两个字段（正文优先文章摘要，退回推荐理由）+ 保留发布时间
+   （此前 radar 条目的时间**永远不显示**，因为 `extra` 里根本没有 `published`）。
+2. **没正文就只剩标题**：新增 `pusher/enrich.py`，只对**将要推送**的条目（每轮 ≤
+   `push.max_enrich`，默认 10）抓一次原文页，按 `og:description` → `meta[description]`
+   → 首个 `<p>` 取正文，8 秒超时、失败静默降级，缓存写 `state/bodies.json`
+   （抓到空也记账，避免每轮重试失败页面）。
+3. **没有内容就不该推**：`push.require_body`（默认 true）在渲染后检查
+   `content_line_count(message) >= 1`，除标题外没有任何内容可读的条目**不推**，
+   日志给出 `[skip:no-body]` 与漏斗计数。
+
+配套渲染改动：
+
+- `facts_only` 体裁（V2EX/社区源）在细节行 ≤1 时补一行 `▎简介：`（首句 ≤100 字）——
+  实测「优惠价出一个香港 CSL esim」原本只剩「标题 + 一行价格」。
+- 速览行标签收敛：`short_label()` 只保留一段且 ≤8 字，
+  「via Hacker News · 24h最热 · 热议参考」这种挤两个标签的噪声不再出现。
+- 摘要打分补「怎么领/门槛」权重（领取/注册/申请/兑换/报名/认证/邀请码）。
+- 价格抽取修正：带标注的价格允许无单位（`现价 120`），并跳过 `14 元/年` 这类**单价**——
+  此前那条 esim 消息显示的价格其实是「14 元/年保号」，真实报价是 120，数字是错的。
+
+### 4.6 漏斗实测数据（2026-10-05，本机 + 线上 state）
+
+线上 `state.json`（GitHub main）显示 2026-10-03 15:14 UTC 之后的 **47.5 小时只推了 3 条**，
+与用户截图逐条对应，**3 条全是噪音**：
+
+| 推送时间（BJT） | 内容 | 命中的词 | 真相 |
+|---|---|---|---|
+| 10-03 23:14 | Gemini 将结束 Flash 和 Pro 模型的免费使用 | `免费使用` | 福利被取消的资讯 |
+| 10-04 20:51 | 我让AI教学生写前端……Web教育者的集体反思 | `学生` | 行业资讯，不是福利 |
+| 10-05 01:34 | 优惠价出一个香港 CSL esim | `优惠` | 二手转卖 |
+
+一轮完整采集（`--report`）在修复前后的对照：
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| 抓取 / 去重后 | 236 / 225 | 262 / 249 |
+| 命中（福利·限时） | 2（2·0），且**两条都是噪音** | 1（1·0），是**真福利**（Reddit iOS 应用终身赠送） |
+| 拒绝原因可见 | 无 | `drop:no-keyword` / `excluded` / `weak-no-action` / `source-not-actionable` / `no-body` / `finished` |
+| 【限时】通道 | 历史 0 命中 | 派生规则上线（硬证据 + 窗口），语料里有正例 |
+
+**供给结论（重要）**：现有可自动化获取的信源池里，真福利本身就是稀疏的——
+V2EX 优惠信息 50 条里 1~3 条、NodeSeek 福利版与吾爱破解各版块 **0 条**、
+Cloudflare/GitHub 博客 0 条、英文促销站（9to5toys 50 条、ghacks 40 条）0 条。
+所以「一天只推一条」**不是筛选太严、也不是 30 分钟间隔太长**（48 轮/天），
+而是池子里就这么多。想推得更多，只能加信源——见第 3.5 节的体检流程与候选清单。
+
 ## 5. 状态管理
 
 - `state/state.json`：已推送键值（URL 哈希 + 标题哈希，滚动 7 天）
 - `state/translations.json`：译文缓存
+- `state/bodies.json`：原文页正文缓存（键=URL 哈希，抓到空也记，避免重复重试）
 - 每次运行后 state 变化 commit 回仓库 —— 仓库持续有提交，规避 GitHub「60 天无活动停用定时任务」
 - 老 `state.json` 里的 `digests` 字段（日报记账）读入即丢弃，不再写回
 
@@ -159,20 +247,27 @@ Message Collections/
 │   │   ├── radar.py         # AI News Radar JSON
 │   │   ├── feed.py          # RSS / Atom（标准库解析）
 │   │   └── telegram.py      # Telegram 公开频道预览
-│   ├── filter.py            # 福利/限时词表匹配、分类、去重
+│   ├── filter.py            # 强/弱词表匹配、否定与作废守卫、分类、去重
+│   ├── facts.py             # 硬证据/可领取/窗口三谓词 + 事实抽取 + 二手交易守卫
+│   ├── enrich.py            # 正文兜底（原文页 og:description / 首段 + 缓存）
+│   ├── report.py            # 逐源漏斗报告（--report）
 │   ├── state.py             # 去重记账（URL + 标题双键）
 │   ├── translate.py         # 英文翻译（降级链 + 缓存）
 │   ├── notify_base.py       # 推送渠道抽象
-│   ├── notify_telegram.py   # Telegram 实现（主渠道）
+│   ├── notify_telegram.py   # Telegram 实现（主渠道）+ 消息渲染
 │   ├── notify_wecom.py      # 企业微信机器人（预留）
 │   ├── notify_email.py      # 邮件（预留）
-│   └── run.py               # 入口（推送 / --dry-run / --probe）
+│   └── run.py               # 入口（推送 / --dry-run / --probe / --report）
 ├── config/
 │   ├── sources.yml          # 信源清单
-│   ├── keywords.yml         # 福利词表 / 限时词表 / 排除词
-│   └── settings.yml         # 渠道开关、单轮条数上限
-├── state/                   # 运行状态（git 管理）
-├── tests/                   # pytest
+│   ├── keywords.yml         # 硬福利词 / 宽词 / 硬限时 / 宽限时 / 排除词
+│   └── settings.yml         # 渠道开关、条数上限、正文闸门、匹配门槛、抓取超时
+├── probe/
+│   ├── probe_candidates.py  # 信源候选体检（抓取量 + 命中量双闸门）
+│   └── preview_samples.py   # 消息样张预览（--send 可人工验收）
+├── state/                   # 运行状态（git 管理：state/translations/bodies）
+├── tests/                   # pytest（含真实噪音/福利语料回归）
+│   └── fixtures/            # noise_corpus.json / offer_corpus.json / radar-sample.json
 └── .github/workflows/       # instant-push / tests
 ```
 
@@ -182,12 +277,22 @@ Message Collections/
 
 | Workflow | Cron (UTC) | 说明 |
 |---|---|---|
-| instant-push | `13,43 * * * *` | 每小时 :13/:43；手动触发支持 `probe` / `only` |
+| instant-push | `13,43 * * * *` | 每小时 :13/:43（**48 轮/天**）；手动触发支持 `probe` / `only` |
 | tests | push / PR 触发 | pytest 全绿门禁 |
 
 **教训**：cron 排在整点/半点会被 GitHub 高峰期大幅延迟（实测 `*/30` 退化为约 2 小时一次），
 故错峰到 :13/:43。Secrets：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、
 （预留）`WEWORK_WEBHOOK_URL`、（可选）`SMTP_*`。
+
+**间隔不是瓶颈**：48 轮/天，而单轮真福利命中量本身是 0~1 条（见 4.6），
+所以「推送少」要靠加信源解决，缩短间隔不会有任何变化。
+
+本地/线上排障用同一条命令看漏斗（不推送、不写 state）：
+
+```bash
+python -m pusher.run --report              # 逐源：抓取 / 已推过 / 命中 / 未命中原因 / 命中明细
+python -m pusher.run --report --only radar # 只看某个源
+```
 
 ## 8. 消息格式
 
@@ -197,18 +302,33 @@ Message Collections/
 ▎价格：¥59.20（到手价）
 ▎折扣码：LIFETIMEO
 
+<摘要：只补细节行没覆盖的内容，剔除评论腔>
 via V2EX 优惠信息 · 10-01 21:43
+```
+
+`facts_only` 体裁（论坛帖）在细节行太少时补一句「这是什么」，避免只剩标题 + 一行数字：
+
+```
+🎁 [福利] 优惠价出一个香港 CSL esim
+
+▎简介：香港 CSL esim, 15GB 中澳台漫游，14 元/年保号，原价 130
+▎价格：<b>120</b>（到手价）
+via V2EX 优惠信息 · 10-04 21:05
 ```
 
 限时窗口类情报抬头为 `⏳ [限时]`。两种体裁（信源配 `layout` 决定）：
 
 | 体裁 | 用于 | 结构 |
 |---|---|---|
-| `bullets`（默认） | 资讯类（radar、博客） | 标题 → 细节行 → 摘要（剔除评论腔）→ 速览行 |
-| `facts_only` | 论坛/社区类（V2EX、NodeSeek） | 标题 → 细节行 → 速览行，**不倒原始正文** |
+| `bullets`（默认） | 资讯类（radar、博客）、短帖社区源（V2EX 免费赠送） | 标题 → 细节行 → 摘要（剔除评论腔）→ 速览行 |
+| `facts_only` | 长流水账社区源（V2EX 优惠信息、NodeSeek） | 标题 → 简介行（细节太少时）→ 细节行 → 速览行，**不倒原始正文** |
 
-`facts_only` 的存在理由：V2EX 帖子正文是一整段没有句末标点的流水账（还混着博客签名与网址），
+`facts_only` 的存在理由：V2EX 优惠信息帖的正文是一整段没有句末标点的流水账（还混着博客签名与网址），
 `build_summary` 的拆句对它无效，倒出来既读不下去也压不掉——不如只给要点，原文交给链接。
+
+**正文闸门**（`push.require_body`，默认 true）：渲染后除标题外没有任何内容可读的条目不推。
+这是「消息必须有正文」的硬保证——源数据没有摘要时会先由 `enrich.py` 抓原文页兜底，
+抓不到就跳过这一条（日志 `[skip:no-body]`，漏斗里有计数）。
 
 ### 渲染规则与实测依据
 
@@ -229,7 +349,8 @@ via V2EX 优惠信息 · 10-01 21:43
   裸匹配会把 `-8259U`（CPU 型号）、`H11SSL-NC`（主板）、`1086110586937`（快递单号）当折扣码。
 - **不再抽取「资格/条件」字段**：正则很容易从论坛正文吞下一整段无关文字，
   条件信息通常已在标题或摘要里出现。
-- 价格优先取「到手价/实付/券后」，它比原价有用。
+- **价格优先取「到手价/实付/现价/券后」**（允许不带单位），并跳过 `14 元/年` 这类**单价**
+  ——实测那条 esim 消息把「14 元/年保号」当成了售价，真实报价 120 元。
 
 ## 9. 风险与对策
 
@@ -238,21 +359,63 @@ via V2EX 优惠信息 · 10-01 21:43
 | 新信源抓不到（403 / 反爬 / 改版） | `--probe` 上线前逐源验证；单源故障隔离；`enabled: false` 快速下线 |
 | 中文社区对境外 IP 限流（Actions 在海外） | 优先选 RSS 出口；必要时给该源配 `proxy`；probe 日志留证 |
 | Telegram 预览页在 Actions 上偶发超时 | 单源隔离 + 下轮重试；必要时走 `options.proxy` |
-| 关键词误报 | 排除词 + 长摘要不参与匹配 + 观察期调优 |
+| 关键词误报 | 强/弱词双层 + 否定语境 + 可领取/窗口证据 + **真实语料回归**（`tests/fixtures/*_corpus.json`） |
 | 多源刷屏 | 标题归一化去重 + 单轮条数上限 |
+| 空壳消息（只有标题） | `enrich.py` 抓原文页兜底 + `push.require_body` 闸门 + 漏斗里的 `[skip:no-body]` |
 | radar 上游故障 | 新鲜度检查 + 跳过该轮；radar 已是普通信源，失效不影响其他源 |
 | Google 翻译 429 | MyMemory 降级 + 缓存；全败回退原文 |
+| Reddit 对同一出口限流（实测连续请求即 429） | 合并多板为**一次**请求；线上每轮只请求一次；失败按单源隔离跳过，`--report` 里可见 |
+| 繁体中文源（台/港）match 不到词表 | **已知缺口**：实测 free.com.tw 10 条 0 命中（免費/優惠 是繁体）。需要时加一层繁→简归一化（约 40 字表），本次未做，避免为不确定收益引入新的匹配层 |
+| 加密空投刷屏类信源 | 排除词 `airdrop/空投/usdt/crypto` + 候选体检时人工看样例（tg-freebie 机械上「通过」但内容全是空投，已拒用） |
 
-## 10. 验证记录
+## 10. 信源变动与候选体检（2026-10-05）
 
-DSH 沙箱默认策略无法启动 shell（`SetNamedSecurityInfoW failed (Win32 5)` 发生在准备阶段，
-与仓库权限无关），本次以一次性放行模式执行全部验证：
+`probe/probe_candidates.py` 把「先 probe 再启用」变成一条命令，双闸门是
+**抓取 ≥5 条**且**命中 ≥1 条**，同时打印样例标题供人工判断内容质量：
+
+```bash
+python probe/probe_candidates.py                     # 体检内置候选清单
+python probe/probe_candidates.py --only tg-freebie   # 只看一个
+python probe/probe_candidates.py --feed https://example.com/feed   # 临时加一个
+```
+
+本轮结论（写进 `config/sources.yml` 注释，避免重复踩坑）：
+
+| 动作 | 信源 | 依据 |
+|---|---|---|
+| **启用** | V2EX 免费赠送（`/feed/free.xml`，**节点 feed**） | tab feed 返回 0 字节是老结论；节点 feed 50 条里 31 条命中真赠送帖。低频：近 7 天 2 条、近 30 天 16 条，故 `max_age_days: 7` |
+| **启用** | Reddit 免费版块（多板合并 feed） | 25 条里 2 条真福利（iOS 应用终身赠送、每周免费有声书）；限流风险已记录 |
+| 保持停用 | NodeSeek / NodeSeek 福利 / 吾爱破解 16·41·42 | 各 20 条 0 命中（二手交易、工具分享） |
+| 保持停用 | hostloc / hn-free-tier / 52pojie freeshare | 非 RSS / SSL 不稳 / feed 为空（老结论复核仍成立） |
+| 拒绝启用 | TG `freebie`、`vpsdeals`、`freebies` | freebie 20 条里 12 条是加密空投刷屏；vpsdeals 0 命中；freebies 只 1 条抽奖 |
+| 空壳 | TG `giveaway`/`freenet`/`letsdeel`/`dealsfreenet`/`cnfreebies`/`maoyangmao` 等 20+ 个候选 | 0 条消息块，名字靠猜必踩 |
+| 本地不可达 | 中文线报站 `xianbao.net`/`51xianbao`/`luymba`/`ymba` | 本机 SSL/连接被断（GFW 侧），Actions（海外）可能可用——**待线上 probe 复核** |
+| 无收益 | `sspai`/小众软件/`free.com.tw`/`9to5toys`/`ghacks`/`producthunt`/`slickdeals`/`post.smzdm.com` | 命中 0~1 条且是文章类噪音 |
+
+## 11. 验证记录
+
+DSH 沙箱默认策略下 shell 起不来（`SetNamedSecurityInfoW failed (Win32 5)` 发生在沙箱准备阶段，
+与仓库权限无关；本机文件权限已按沙箱自带的诊断脚本修复过一次），
+因此**所有 shell 操作（pytest / git / 联网探测）都在一次性放行模式下执行**，
+这也是本仓库的既有做法。文件读写工具不受影响。
+
+### v0.6（2026-10-05）
 
 | 验证项 | 结果 |
 |---|---|
-| `python -m pytest -q` | **73 passed** |
-| `python -m pusher.run --probe`（仅启用源） | **9/9 可用** |
-| 已下线文件删除 | 已 `git rm`，工作区干净 |
+| `python -m pytest -q` | **164 passed**（v0.5 记录是 73，本版新增 91 条） |
+| 真实语料回归 | 噪音语料 **13/13 不推**；福利语料 **10/10 命中且 kind 正确** |
+| `python -m pusher.run --report`（真实网络） | 262 抓取 / 249 去重后 / **命中 1（真福利）** / 每条拒绝原因可见 |
+| `python -m pusher.run --dry-run` | 0 条空壳消息（正文闸门生效）；不再因 GBK 崩溃 |
+| 线上 3 条历史噪音 | 全部被拦下：`freebie 将结束…` → 否定语境；`学生…反思` → 弱词无硬证据；`esim` → 二手交易守卫 |
+| 信源候选体检 | 探测 40+ 候选，新增 2 个真产出源（V2EX 免费赠送节点、Reddit 免费版块） |
+
+### v0.5（2026-10-03，历史记录）
+
+| 验证项 | 结果 |
+|---|---|
+| `python -m pytest -q` | 73 passed |
+| `python -m pusher.run --probe`（仅启用源） | 9/9 可用 |
 | 提交 | 已 rebase 到 Actions 的 state 提交之上并推送 main |
 
 信源实测明细（2026-10-03，本机 + GitHub Actions 双向验证）：
@@ -269,7 +432,7 @@ DSH 沙箱默认策略无法启动 shell（`SetNamedSecurityInfoW failed (Win32 
 | cloudflare-blog | ✅ 20 条 | 待首批日志 | 启用 |
 | github-blog | ✅ 5 条 | 待首批日志 | 启用 |
 | linux.do（两个源） | ❌ 连接超时 | ❌ **403 Forbidden** | **移除**：对数据中心 IP 封锁 |
-| v2ex-free | ⚠️ 0 字节 | ⚠️ 0 条 | 停用：feed 无效 |
+| v2ex-free | ⚠️ 0 字节 | ⚠️ 0 条 | 停用：feed 无效（**v0.6 已改用节点 feed 恢复**） |
 | hostloc | ⚠️ 返回 HTML | ⚠️ 0 条 | 停用：非 RSS |
 | hn-free-tier | ❌ SSL 断连 | ⚠️ 0 条 | 停用：不稳定且长期无命中 |
 | tg-yangmaoshe / zaihua / yanggou / baipiao | ❌ 空壳 | — | 已删/未启用 |
@@ -279,15 +442,21 @@ DSH 沙箱默认策略无法启动 shell（`SetNamedSecurityInfoW failed (Win32 
    **信源必须先 probe 再上线**，这条流程已写进 `config/sources.yml` 的注释。
 2. 频道名不能靠记忆猜（`yangmaoshe` 是空壳），Telegram 源必须探测消息块数量。
 3. 论坛类 RSS 常按版块给 feed，版块号要逐个试（52pojie 只有 2/16/41/42 有内容）。
+4. **同一个站点的不同 feed 差别极大**：V2EX `/feed/tab/free.xml` 是 0 字节，
+   而 `/feed/free.xml`（节点 feed）有 50 条真赠送帖。停用一个源之前要试过它的其它出口。
+5. **机械闸门挡不住内容垃圾**：`tg-freebie` 的「抓取 ≥5 且命中 ≥1」是满足的，
+   但 20 条里 12 条是加密空投。体检工具必须打印样例标题给人看。
 
 ```bash
 # 本地复现验证
 python -m pytest -q
 python -m pusher.run --probe                 # 逐源体检（不推送、不写 state）
-python -m pusher.run --dry-run               # 只看消息样式
+python -m pusher.run --report                # 逐源漏斗 + 未命中原因
+python -m pusher.run --dry-run               # 只看消息样式（含正文兜底与闸门）
+python probe/probe_candidates.py             # 候选信源体检（上线前必做）
 ```
 
-## 11. 仓库与协作
+## 12. 仓库与协作
 
 - 仓库：[Djjvcgh/message-collections](https://github.com/Djjvcgh/message-collections)（public，main 分支）
 - 遵循 AGENTS.md：每次改动单独 commit，pytest 全绿再交付
