@@ -181,6 +181,30 @@ def test_extract_facts_requires_label_for_codes():
     assert "折扣码" not in facts
 
 
+def test_extract_facts_prefers_labeled_price_without_unit():
+    """实测：正文「原价 130，现价 120」的 120 没有单位，旧逻辑取到了「14 元/年保号」。"""
+    facts = dict(
+        extract_facts("香港 CSL esim, 15GB 中澳台漫游，14 元/年保号，原价 130，现价 120 联系绿泡泡 abc")
+    )
+    assert facts["价格"] == "120（到手价）"
+
+
+def test_extract_facts_skips_per_unit_price():
+    """「14 元/年」是套餐单价，不是售价。"""
+    assert "价格" not in dict(extract_facts("套餐 14 元/年保号，续费另算"))
+
+
+def test_negated_offer_yields_no_evidence():
+    """否定语境先行屏蔽：福利消失的资讯不能产生任何硬证据。"""
+    from pusher.facts import has_offer_signal, has_window_signal
+
+    assert not has_offer_signal(make(title="Gemini 将结束 Flash 和 Pro 模型的免费使用"))
+    assert not has_offer_signal(make(title="某服务不再免费", summary="下月起开始收费"))
+    assert has_offer_signal(make(title="免费领取 100 元额度"))
+    assert has_window_signal(make(title="限量 100 份，先到先得"))
+    assert has_window_signal(make(title="5 折优惠", summary="活动截止 10月15日"))
+
+
 def test_extract_facts_returns_empty_when_absent():
     assert extract_facts("普通标题 普通摘要，没有价格也没有期限。") == []
 

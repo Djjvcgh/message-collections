@@ -17,7 +17,13 @@ from pathlib import Path
 
 import yaml
 
-from .filter import KIND_OPPORTUNITY, KIND_WELFARE, WelfareFilter, dedupe
+from .filter import (
+    KIND_OPPORTUNITY,
+    KIND_WELFARE,
+    MAX_REASON_CHARS,
+    WelfareFilter,
+    dedupe,
+)
 from .facts import is_actionable
 from .notify_base import send_all
 from .notify_email import EmailChannel
@@ -126,6 +132,23 @@ def _translate_shown(items):
         if is_mostly_english(item.summary):
             item.summary = translate_title(item.summary, proxies=proxies)
     return items
+
+
+def build_filter(kw, settings=None):
+    """按 config/keywords.yml 组装过滤器（硬词 + 宽词 + 排除词）。
+
+    max_reason_chars 可被 settings.yml → filter.max_reason_chars 覆盖，
+    调参不必改代码。
+    """
+    limits = (settings or {}).get("filter") or {}
+    return WelfareFilter(
+        kw.get("welfare_keywords", []),
+        kw.get("opportunity_keywords", []),
+        kw.get("exclude_words", []),
+        weak_welfare_keywords=kw.get("weak_welfare_keywords", []),
+        weak_opportunity_keywords=kw.get("weak_opportunity_keywords", []),
+        max_reason_chars=int(limits.get("max_reason_chars", MAX_REASON_CHARS)),
+    )
 
 
 def collect(sources, proxies=None, log_fn=log):
@@ -267,11 +290,7 @@ def main(argv=None):
     settings = load_yaml(SETTINGS_PATH)
 
     state = State.load(STATE_PATH)
-    wf = WelfareFilter(
-        kw.get("welfare_keywords", []),
-        kw.get("opportunity_keywords", []),
-        kw.get("exclude_words", []),
-    )
+    wf = build_filter(kw, settings)
     only = [s.strip() for s in (args.only or "").split(",") if s.strip()]
     proxies = _outbound_proxies()
 

@@ -1,17 +1,31 @@
 """福利 / 限时情报分类与关键词命中。
 
-两类词表（config/keywords.yml）：
-- welfare_keywords：可直接领取的福利（免费额度、赠送、优惠码……）
-- opportunity_keywords：不是送东西、但错过就没了的限时窗口（开放注册、截止、限量……）
+四张词表（config/keywords.yml）：
+- ``welfare_keywords``：**硬福利词**，命中即成立（免费额度、赠送、折扣码……）
+- ``weak_welfare_keywords``：**宽词**（优惠、折扣、福利、学生、免费使用……）。
+  单独出现不算福利——2026-10-05 实测线上推的 3 条全是这类词捞进来的
+  行业资讯（「Gemini 将结束 Flash 和 Pro 模型的免费使用」命中 `免费使用`、
+  「我让AI教学生写前端」命中 `学生`），所以必须与「硬福利证据」共现才成立。
+- ``opportunity_keywords`` / ``weak_opportunity_keywords``：限时窗口，
+  弱词同样要求有可领取动作或窗口证据。
+- ``exclude_words``：命中即整条丢弃。
 
-一个条目同时命中两类时按福利处理（信息量更大）。
-中文关键词在去空白文本上做子串匹配（"送 token" ≡ "送token"）；
-英文关键词用词边界匹配（容忍复数 s），避免 industrial 误命中 trial。
-匹配范围：标题(中/英) + 信号词 + 短摘要；过长的摘要是整篇正文，
-关键词撞车概率高，只在标题毫无命中时才作为兜底。
+命中顺序：排除词 → 硬福利 → 弱福利（需硬信号）→ 硬限时 →
+弱限时（需可领取动作）→ **派生限时**（有硬信号 + 有窗口 = 错过就没）。
+同时命中福利与限时时按福利处理（信息量更大）。
+
+匹配范围：标题(中/英) + 信号词 + 短摘要；摘要超过 ``max_reason_chars``
+视为整篇正文，不参与匹配。**弱词不匹配 title_en**：实测英文标题里的
+students / discount 会把 AI 行业新闻整条捞进来。
 """
 import re
 
+from .facts import (
+    has_claim_signal,
+    has_offer_signal,
+    has_window_signal,
+    mask_negated,
+)
 from .state import title_key
 
 KIND_WELFARE = "welfare"
@@ -56,24 +70,44 @@ def head_fields(item):
 
 
 def mask_benign(parts):
-    """抹掉已知的「看着像福利其实不是」说法，避免宽词被蹭。"""
+    """抹掉已知的「看着像福利其实不是」说法，避免宽词被蹭。
+
+    两层：字面短语（免费公开课）+ 否定语境（将结束…免费使用、
+    不再免费、开始收费），后者与 ``facts.mask_negated`` 同一套规则，
+    所以分类层与事实层对「福利正在消失」的判断永远一致。
+    """
     out = []
     for part in parts:
-        text = part or ""
+        text = mask_negated(part or "")
         for phrase in _BENIGN_PHRASES:
             text = text.replace(phrase, _PHRASE_MASK)
         out.append(text)
     return out
 
 
-def text_fields(item):
-    """标题 + 短摘要：摘要过长（整篇正文）时丢弃，避免误报。"""
+def _short_reason(item, max_reason_chars):
+    """短摘要才参与匹配；过长（整篇正文）或按信源要求关闭时返回空串。"""
     reason = _get(item, "reason")
     if not _get(item, "match_summary", True):
-        reason = ""
-    elif len(reason) > MAX_REASON_CHARS:
-        reason = ""
-    return mask_benign(head_fields(item)) + [reason]
+        return ""
+    if len(reason) > max_reason_chars:
+        return ""
+    return reason
+
+
+def text_fields(item, max_reason_chars=MAX_REASON_CHARS):
+    """标题 + 短摘要：摘要过长（整篇正文）时丢弃，避免误报。"""
+    return mask_benign(head_fields(item)) + [_short_reason(item, max_reason_chars)]
+
+
+def weak_fields(item, max_reason_chars=MAX_REASON_CHARS):
+    """弱词匹配范围：中文标题 + 信号词 + 短摘要，**不含英文标题**。
+
+    实测：radar 的 title_en「AI is eroding … the trust between faculty and
+    students」让一条 AI 行业新闻命中了英文弱词 student。
+    """
+    parts = [_get(item, "title"), " ".join(_get(item, "signals", []) or [])]
+    return mask_benign(parts) + [_short_reason(item, max_reason_chars)]
 
 
 def text_blob(parts):
@@ -124,10 +158,21 @@ class _WordSet:
 class WelfareFilter:
     """命中判定 + 分类。exclude_words 优先级最高，命中即整条丢弃。"""
 
-    def __init__(self, welfare_keywords=(), opportunity_keywords=(), exclude_words=()):
+    def __init__(
+        self,
+        welfare_keywords=(),
+        opportunity_keywords=(),
+        exclude_words=(),
+        weak_welfare_keywords=(),
+        weak_opportunity_keywords=(),
+        max_reason_chars=MAX_REASON_CHARS,
+    ):
         self.welfare = _WordSet(welfare_keywords)
         self.opportunity = _WordSet(opportunity_keywords)
+        self.weak_welfare = _WordSet(weak_welfare_keywords)
+        self.weak_opportunity = _WordSet(weak_opportunity_keywords)
         self.exclude = [w.lower() for w in (exclude_words or []) if w]
+        self.max_reason_chars = max_reason_chars
 
     def _excluded(self, parts):
         blob = text_blob(parts)
@@ -136,12 +181,23 @@ class WelfareFilter:
 
     def classify(self, item):
         """返回 'welfare' / 'opportunity'，不命中返回 None。"""
-        parts = text_fields(item)
+        parts = text_fields(item, self.max_reason_chars)
         if self._excluded(parts):
             return None
         if self.welfare.matches(parts):
             return KIND_WELFARE
+        weak_parts = weak_fields(item, self.max_reason_chars)
+        if self.weak_welfare and self.weak_welfare.matches(weak_parts):
+            # 宽词必须与硬福利证据共现，否则就是行业资讯
+            if has_offer_signal(item):
+                return KIND_WELFARE
         if self.opportunity.matches(parts):
+            return KIND_OPPORTUNITY
+        if self.weak_opportunity and self.weak_opportunity.matches(weak_parts):
+            if has_offer_signal(item) or has_claim_signal(item):
+                return KIND_OPPORTUNITY
+        # 派生限时：既拿得到东西、又有窗口（截止/名额/先到先得），就是「错过没了」
+        if has_offer_signal(item) and has_window_signal(item):
             return KIND_OPPORTUNITY
         return None
 
