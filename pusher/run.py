@@ -36,6 +36,21 @@ SOURCES_PATH = ROOT / "config" / "sources.yml"
 DEFAULT_MAX_PUSH = 8
 
 
+def ensure_utf8_console():
+    """把标准输出切到 UTF-8。
+
+    Windows 控制台默认 GBK，打印 `🎁 [福利]` 这类抬头会直接抛
+    UnicodeEncodeError（实测 --dry-run 在本地跑到第一条消息就崩），
+    而 --dry-run 正是文档里推荐的验证方式。errors="replace" 兜底，
+    保证即使重设编码失败也不会中断推送流程。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, TypeError, ValueError, OSError):
+            pass
+
+
 def log(msg):
     print(msg, flush=True)
 
@@ -245,6 +260,7 @@ def main(argv=None):
     parser.add_argument("--limit", type=int, default=None, help="本轮推送条数上限")
     args = parser.parse_args(argv)
 
+    ensure_utf8_console()
     load_env()
     cfg = load_yaml(SOURCES_PATH)
     kw = load_yaml(KEYWORDS_PATH)

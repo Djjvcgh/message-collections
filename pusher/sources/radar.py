@@ -30,9 +30,7 @@ class RadarSource:
             return []
         items = []
         for raw in normalize_all(data):
-            # normalize() 把 radar 的中文推荐理由放在 reason 里，
-            # Item 的统一摘要字段是 summary，这里显式搬运，避免推送时摘要空白
-            raw["summary"] = raw.get("reason") or ""
+            apply_body(raw)
             raw["match_summary"] = self.match_summary
             item = as_item(raw)
             item.source_id = self.id
@@ -41,6 +39,24 @@ class RadarSource:
             items = items[: self.limit]
         log(f"[source:{self.id}] {len(items)} items (age {age:.1f}h)")
         return items
+
+
+def apply_body(raw):
+    """把 radar 的两个正文候选合成统一摘要，并保留发布时间。
+
+    - 优先上游文章摘要（summary，读者看到的是内容本身）
+    - 退回中文推荐理由（recommend_reason_zh，通常是一句话导读）
+    - 两者皆空就留空，交给 pusher/enrich.py 抓原文页兜底
+    """
+    body = (raw.get("summary") or "").strip()
+    reason = (raw.get("reason") or "").strip()
+    raw["summary"] = body or reason
+    raw["extra"] = {
+        "published": raw.get("published") or "",
+        "site_id": raw.get("site_id") or "",
+        "body_from": "summary" if body else ("reason" if reason else ""),
+    }
+    return raw
 
 
 __all__ = ["RadarSource"]

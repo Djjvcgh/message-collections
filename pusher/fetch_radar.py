@@ -35,6 +35,13 @@ def normalize(item):
         "tier_label": item.get("source_tier_label", ""),
         "signals": item.get("ai_signals") or [],
         "reason": item.get("recommend_reason_zh") or "",
+        # 上游还有文章摘要（summary）与发布时间（published_at），此前两个字段都被丢弃：
+        # 2026-10-05 实测 112 条里 summary 非空 23 条、recommend_reason_zh 非空 75 条，
+        # 只映射 reason 的结果是 89 条推送时没有任何正文、并且永远不显示时间。
+        # 两者取其一后仍覆盖不到的条目，由 pusher/enrich.py 从原文页兜底。
+        "summary": item.get("summary") or "",
+        "published": item.get("published_at") or item.get("first_seen_at") or "",
+        "site_id": item.get("site_id") or "",
     }
 
 

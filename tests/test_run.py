@@ -171,6 +171,37 @@ def test_main_without_channel_aborts(monkeypatch, capsys):
     assert "no usable channel configured" in capsys.readouterr().out
 
 
+def test_ensure_utf8_console_survives_gbk_stdout(monkeypatch):
+    """实测缺陷：Windows GBK 控制台下 --dry-run 打印 🎁 直接抛 UnicodeEncodeError。"""
+    import io
+    import sys
+
+    import pusher.run as run_mod
+
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="gbk", errors="strict", newline="")
+    monkeypatch.setattr(sys, "stdout", stream)
+    run_mod.ensure_utf8_console()
+    run_mod.log("🎁 [福利] 测试")
+    stream.flush()
+    assert "🎁 [福利]" in raw.getvalue().decode("utf-8")
+
+
+def test_ensure_utf8_console_tolerates_streams_without_reconfigure(monkeypatch):
+    """pytest 捕获流等对象没有 reconfigure，必须静默跳过而不是抛错。"""
+    import sys
+
+    import pusher.run as run_mod
+
+    class DumbStream:
+        def write(self, text):
+            return len(text)
+
+    monkeypatch.setattr(sys, "stdout", DumbStream())
+    monkeypatch.setattr(sys, "stderr", DumbStream())
+    run_mod.ensure_utf8_console()   # 不抛异常即通过
+
+
 def test_config_yaml_matches_code():
     """配置与代码同步：sources.yml 里的 type 必须都在注册表里。"""
     from pathlib import Path
