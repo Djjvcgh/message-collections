@@ -56,15 +56,18 @@ sources:
   # 注：52pojie 的 freeshare 版（fid=7/26/40/52）实测 RSS 为空，不可用，
   # 已验证可用的版块是 fid=2/16/41/42（fid=2 即当前配置）。
 
-  # 以下三个源 2026-10-03 实测不适合作为生产源，已停用（保留清单便于复核）：
-  # v2ex 免费赠送返回 0 字节 Atom；hostloc 返回 HTML 而非 RSS；
-  # linux.do 在 Actions 上 403 Forbidden（对数据中心 IP 的封锁），已整段移除。
+  # 2026-10-05 修正：原来停用它是因为 `/feed/tab/free.xml` 返回 0 字节，
+  # 但**节点** feed `/feed/free.xml` 是活的且质量最高——50 条里 31 条命中，
+  # 全是「内网云兑换券」「送网易云会员」「招行福利两件套」这类真赠送帖。
+  # 注意它是低频节点：近 7 天 2 条、近 30 天 16 条，所以 max_age_days 放到 7 天。
   - id: v2ex-free
     type: rss
-    enabled: false
     options:
-      url: https://www.v2ex.com/feed/tab/free.xml
+      url: https://www.v2ex.com/feed/free.xml
       name: V2EX 免费赠送
+      # 该节点也混着「求个会员」的索要帖与二手交易，只放行真能领到的
+      require_actionable: true
+      max_age_days: 7
   - id: hostloc
     type: rss
     enabled: false
@@ -79,6 +82,18 @@ sources:
     options:
       url: https://hnrss.org/newest?q=free+tier
       name: HN free tier
+
+  # --- Reddit 免费版块（多个板合并成一个 feed，一次请求）---
+  # 2026-10-05 实测：25 条里 2 条真福利（iOS 应用终身赠送、每周免费有声书）。
+  # 风险：Reddit 对同一出口有速率限制，连续请求会 429（实测第二次即被限流）；
+  # 线上每轮只请求一次，通常可用，失败时按单源故障隔离跳过，不影响其他源。
+  - id: reddit-freebies
+    type: rss
+    options:
+      url: https://www.reddit.com/r/freebies+eFreebies+AppHookup+freegames+GameDealsFree+FreeGameFindings+FreeEBOOKS/.rss
+      name: Reddit 免费版块
+      # 免费赠送帖本身时效很短，超过 3 天的基本已领完
+      max_age_days: 3
 
   # --- Telegram 公开频道：羊毛信息最快的一手来源 ---
   # 频道名必须在 CI/本地探测通过才算数（2026-10-03：yangmaoshe 为空壳，已删）
