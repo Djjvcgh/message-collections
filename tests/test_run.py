@@ -58,7 +58,7 @@ def make_filter():
     return WelfareFilter(WELFARE_KW, OPPORTUNITY_KW, ["广告"])
 
 
-def run(tmp_path, monkeypatch, channels, max_push=8, dry_run=False):
+def run(tmp_path, monkeypatch, channels, max_push=8, dry_run=False, log_fn=None):
     monkeypatch.setitem(SOURCE_TYPES, "fake", FakeSource)
     return run_once(
         {"sources": [{"id": "fake", "type": "fake"}]},
@@ -68,7 +68,7 @@ def run(tmp_path, monkeypatch, channels, max_push=8, dry_run=False):
         dry_run=dry_run,
         max_push=max_push,
         proxies=None,
-        log=lambda *_: None,
+        log=log_fn or (lambda *_: None),
         state_path=tmp_path / "state.json",
     )
 
@@ -169,6 +169,100 @@ def test_main_without_channel_aborts(monkeypatch, capsys):
     monkeypatch.setattr(run_mod, "build_channels", lambda settings: [])
     assert main([]) == 1
     assert "no usable channel configured" in capsys.readouterr().out
+
+
+def make_thin_source(title):
+    """只有一个条目、且源数据里没有任何正文的假信源。"""
+
+    class ThinSource:
+        type = "thin"
+
+        def __init__(self, source_id, options=None):
+            self.id = source_id
+
+        def fetch(self, log=print, **ctx):
+            return [Item(title=title, url="https://t.example.com/1", source="Test")]
+
+    return ThinSource
+
+
+def test_body_gate_drops_title_only_messages(tmp_path, monkeypatch):
+    """正文闸门：渲染后除了标题没有内容可读的条目不推（用户反馈的核心诉求）。"""
+    monkeypatch.setitem(SOURCE_TYPES, "thin", make_thin_source("某某免费额度活动开启"))
+    cfg = {"sources": [{"id": "thin", "type": "thin"}]}
+    channel = RecordingChannel()
+    sent = run_once(
+        cfg,
+        make_filter(),
+        State.load(tmp_path / "state.json"),
+        [channel],
+        log=lambda *_: None,
+        state_path=tmp_path / "state.json",
+        require_body=True,
+        enrich_fn=None,
+    )
+    assert sent == 0
+    assert channel.sent == []    # 关掉闸门时仍然可推（配置项，便于按数据回退）
+    sent_loose = run_once(
+        cfg,
+        make_filter(),
+        State.load(tmp_path / "state2.json"),
+        [RecordingChannel()],
+        log=lambda *_: None,
+        state_path=tmp_path / "state2.json",
+        require_body=False,
+        enrich_fn=None,
+    )
+    assert sent_loose == 1
+
+
+def test_enrich_hook_fills_body_before_gate(tmp_path, monkeypatch):
+    """补正文要发生在闸门之前：补到正文的条目应该能推出去。"""
+    monkeypatch.setitem(SOURCE_TYPES, "thin", make_thin_source("某某免费额度活动"))
+
+    def fake_enrich(items, proxies=None, max_items=0, log=print):
+        for item in items:
+            item.summary = "从原文页补来的正文，说明这是什么活动。"
+        return len(items)
+
+    channel = RecordingChannel()
+    sent = run_once(
+        {"sources": [{"id": "thin", "type": "thin"}]},
+        make_filter(),
+        State.load(tmp_path / "state.json"),
+        [channel],
+        log=lambda *_: None,
+        state_path=tmp_path / "state.json",
+        require_body=True,
+        enrich_fn=fake_enrich,
+    )
+    assert sent == 1
+    assert "从原文页补来的正文" in channel.sent[0]
+
+
+def test_funnel_counts_are_logged(tmp_path, monkeypatch):
+    """漏斗计数进日志，便于在 Actions 里复盘「为什么没推」。"""
+    lines = []
+    run(tmp_path, monkeypatch, [RecordingChannel()], log_fn=lines.append)
+    joined = [line for line in lines if line.startswith("funnel:")]
+    assert joined, lines
+    assert "drop:no-keyword" in joined[0]
+    assert "drop:excluded" in joined[0]
+
+
+def test_report_lists_sources_and_hits(tmp_path, monkeypatch, capsys):
+    """--report：逐源漏斗 + 命中明细（不推送、不写 state）。"""
+    from pusher.report import funnel_report
+
+    monkeypatch.setitem(SOURCE_TYPES, "fake", FakeSource)
+    cfg = {"sources": [{"id": "fake", "type": "fake"}]}
+    code = funnel_report(cfg, make_filter(), State.load(tmp_path / "state.json"), log=print)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "[report:fake]" in out
+    assert "漏斗汇总" in out
+    assert "某云赠送免费服务器 3 个月" in out
+    assert not (tmp_path / "state.json").exists()
 
 
 def test_ensure_utf8_console_survives_gbk_stdout(monkeypatch):

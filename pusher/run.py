@@ -4,6 +4,7 @@
   python -m pusher.run                      # 拉取全部信源，命中即推送
   python -m pusher.run --dry-run            # 只打印不发送
   python -m pusher.run --probe              # 逐源探测可用性（不推送、不写 state）
+  python -m pusher.run --report             # 逐源漏斗：抓了多少 / 命中多少 / 为什么没推
   python -m pusher.run --only linuxdo-free  # 只跑指定信源 id（可重复 / 逗号分隔）
   python -m pusher.run --limit 0            # 覆盖本轮推送条数上限
 
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import yaml
 
+from . import enrich
 from .filter import (
     KIND_OPPORTUNITY,
     KIND_WELFARE,
@@ -27,7 +29,11 @@ from .filter import (
 from .facts import is_actionable
 from .notify_base import send_all
 from .notify_email import EmailChannel
-from .notify_telegram import TelegramChannel, build_instant_message
+from .notify_telegram import (
+    TelegramChannel,
+    build_instant_message,
+    content_line_count,
+)
 from .notify_wecom import WeComChannel
 from .sources import SOURCE_TYPES  # noqa: F401 — 触发信源注册
 from .sources.base import load_sources
@@ -40,6 +46,7 @@ SETTINGS_PATH = ROOT / "config" / "settings.yml"
 KEYWORDS_PATH = ROOT / "config" / "keywords.yml"
 SOURCES_PATH = ROOT / "config" / "sources.yml"
 DEFAULT_MAX_PUSH = 8
+DEFAULT_MAX_ENRICH = 10
 
 
 def ensure_utf8_console():
@@ -211,6 +218,97 @@ def save_state(state, path=STATE_PATH):
     state.save(path)
 
 
+def add_stat(stats, key, count=1):
+    stats[key] = stats.get(key, 0) + count
+
+
+def format_stats(stats):
+    """把漏斗计数压成一行，Actions 日志里可直接复盘「为什么没推」。"""
+    if not stats:
+        return "(无)"
+    return " ".join(f"{key}={stats[key]}" for key in sorted(stats))
+
+
+def build_enrich_fn(state_path=None, settings=None, persist=True):
+    """构造正文兜底回调：缓存写在 state/bodies.json。
+
+    persist=False（dry-run）时只读缓存、不落盘，保持「dry-run 不写 state」的约定。
+    """
+    conf = (settings or {}).get("enrich") or {}
+    cache_path = Path(state_path).parent / "bodies.json" if state_path else enrich.CACHE_PATH
+    cache = enrich.load_cache(cache_path)
+    timeout = float(conf.get("timeout", enrich.DEFAULT_TIMEOUT))
+    save = (lambda data: enrich.save_cache(data, cache_path)) if persist else None
+
+    def run_enrich(items, proxies=None, max_items=DEFAULT_MAX_ENRICH, log=log):
+        return enrich.enrich_items(
+            items,
+            cache,
+            timeout=timeout,
+            max_items=max_items,
+            proxies=proxies,
+            save=save,
+            log=log,
+        )
+
+    return run_enrich
+
+
+def classify_items(fresh, wf, stats=None):
+    """把去重后的条目分成可推与不可推，并把原因记进 stats。
+
+    stats 里的键就是「为什么没推」，--report 直接拿它出逐源漏斗，
+    这样「筛选是不是太严」永远有数据可查，不必靠猜。
+    """
+    stats = stats if stats is not None else {}
+    classified = []
+    for item in fresh:
+        kind, reason = wf.explain(item)
+        if not kind:
+            add_stat(stats, f"drop:{reason}")
+            continue
+        # 交易/灌水比例高的社区源：必须含明确优惠信息才推，否则噪声远多于价值
+        if item.require_actionable and not is_actionable(item):
+            add_stat(stats, "drop:source-not-actionable")
+            continue
+        item.extra["kind"] = kind
+        item.extra["match"] = reason
+        classified.append(item)
+    return classified
+
+
+def render_candidates(items, proxies=None, log=log, enrich_fn=None, max_enrich=DEFAULT_MAX_ENRICH):
+    """补正文 → 翻译 → 渲染，返回 {item.key(): 消息}。
+
+    渲染只做一次：正文闸门、dry-run、真实投递都复用同一份消息，
+    避免「闸门看到的」和「用户收到的」不是同一条。
+    """
+    if enrich_fn is not None and items:
+        filled = enrich_fn(items, proxies=proxies, max_items=max_enrich, log=log)
+        if filled:
+            log(f"enriched {filled} items from original pages")
+    _translate_shown(items)
+    return {item.key(): build_instant_message(item, kind=item.extra["kind"]) for item in items}
+
+
+def apply_body_gate(items, require_body, stats, messages, log=log):
+    """正文闸门：丢掉「渲染后除了标题没有别的内容」的条目。
+
+    用户的第一条反馈就是消息缺内容，所以默认不推空壳消息；
+    条数少时宁可少推，也不要推一条只有标题的资讯。
+    """
+    if not require_body:
+        return list(items)
+    kept = []
+    for item in items:
+        if content_line_count(messages.get(item.key(), "")) < 1:
+            add_stat(stats, "drop:no-body")
+            log(f"[skip:no-body] {item.title[:60]}")
+            continue
+        kept.append(item)
+    return kept
+
+
 def run_once(
     cfg,
     wf,
@@ -221,8 +319,11 @@ def run_once(
     proxies=None,
     log=log,
     state_path=None,
+    require_body=True,
+    max_enrich=DEFAULT_MAX_ENRICH,
+    enrich_fn=None,
 ):
-    """采集 → 去重 → 分类 → 翻译 → 推送 → 落盘。
+    """采集 → 去重 → 分类 → 补正文 → 翻译/渲染 → 正文闸门 → 排序 → 推送 → 落盘。
 
     返回本轮推送成功的条数。dry-run 不发送、不记账、不写 state。
     失败投递的条目本轮不记账，下一轮自动重试。
@@ -235,30 +336,35 @@ def run_once(
     fresh = dedupe(raw, state)
     log(f"collected {len(raw)} items, {len(fresh)} after dedupe")
 
-    classified = []
-    for item in fresh:
-        kind = wf.classify(item)
-        if not kind:
-            continue
-        # 交易/灌水比例高的社区源：必须含明确优惠信息才推，否则噪声远多于价值
-        if item.require_actionable and not is_actionable(item):
-            continue
-        item.extra["kind"] = kind
-        classified.append(item)
+    stats = {}
+    classified = classify_items(fresh, wf, stats)
     log(
         f"hits: {len(classified)} "
         f"(welfare {sum(1 for i in classified if i.extra['kind'] == KIND_WELFARE)}, "
         f"opportunity {sum(1 for i in classified if i.extra['kind'] == KIND_OPPORTUNITY)})"
     )
     if not classified:
+        log(f"funnel: {format_stats(stats)}")
         return 0
 
-    to_send = select_pushes(classified, DEFAULT_MAX_PUSH if max_push is None else max_push)
-    _translate_shown(to_send)
+    messages = render_candidates(
+        classified,
+        proxies=proxies,
+        log=log,
+        enrich_fn=enrich_fn,
+        max_enrich=max_enrich,
+    )
+    candidates = apply_body_gate(classified, require_body, stats, messages, log=log)
+    if not candidates:
+        log("all hits lack a readable body, nothing to push")
+        log(f"funnel: {format_stats(stats)}")
+        return 0
 
+    to_send = select_pushes(candidates, DEFAULT_MAX_PUSH if max_push is None else max_push)
+    log(f"funnel: {format_stats(stats)}")
     sent = 0
     for index, item in enumerate(to_send):
-        message = build_instant_message(item, kind=item.extra["kind"])
+        message = messages[item.key()]
         if dry_run:
             log(message + "\n---")
             continue
@@ -279,6 +385,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="pusher")
     parser.add_argument("--dry-run", action="store_true", help="只打印不发送")
     parser.add_argument("--probe", action="store_true", help="逐源探测可用性")
+    parser.add_argument("--report", action="store_true", help="逐源漏斗报告（不推送、不写 state）")
     parser.add_argument("--only", default=None, help="只跑指定信源 id（逗号分隔）")
     parser.add_argument("--limit", type=int, default=None, help="本轮推送条数上限")
     args = parser.parse_args(argv)
@@ -302,16 +409,20 @@ def main(argv=None):
         probe(sources, proxies=proxies, log_fn=log)
         return 0
 
+    if args.report:
+        from .report import funnel_report
+
+        return funnel_report(cfg, wf, state, only=only, proxies=proxies, log=log)
+
     channels = [] if args.dry_run else build_channels(settings)
     if not args.dry_run and not channels:
         log("no usable channel configured, abort")
         return 1
 
+    push_conf = settings.get("push") or {}
     limit = args.limit
     if limit is None:
-        limit = int(
-            (settings.get("push") or {}).get("max_per_run", DEFAULT_MAX_PUSH)
-        )
+        limit = int(push_conf.get("max_per_run", DEFAULT_MAX_PUSH))
 
     sent = run_once(
         cfg,
@@ -322,6 +433,9 @@ def main(argv=None):
         max_push=limit,
         proxies=proxies,
         state_path=STATE_PATH,
+        require_body=bool(push_conf.get("require_body", True)),
+        max_enrich=int(push_conf.get("max_enrich", DEFAULT_MAX_ENRICH)),
+        enrich_fn=build_enrich_fn(STATE_PATH, settings, persist=not args.dry_run),
     )
     log(f"done: {sent} pushed")
     return 0

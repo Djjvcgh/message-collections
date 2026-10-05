@@ -40,6 +40,8 @@ HEADLINE_LIMIT = 110         # 重做后的标题长度上限
 MIN_REASON_FOR_HEADLINE = 20  # 摘要短于这个长度就不足以当标题
 FIRST_SENTENCE_BONUS = 6
 MAX_DETAIL_LINES = 5         # 细节行上限，避免比正文还长
+BRIEF_LIMIT = 100            # 「简介」行只给一句，不倒流水账
+LABEL_LIMIT = 8              # 速览行标签长度上限（「24h最热 · 热议参考」这类复合标签只留一段）
 
 # 标题开头的方括号标记（【福利】【免费赠送】【慢讯】…）：信息量低，去掉
 _BRACKET_TAG = re.compile(r"^\s*[\[【（(][^\]】)）]{1,12}[\]】)）]\s*")
@@ -52,8 +54,8 @@ _TAG_NOISE = re.compile(
 # 叙事/评论腔调的开头：资讯类摘要常写成「想知道…读这篇」「我试用了…」，
 # 这类句子对「一眼看懂发生了什么」没有帮助，只在摘要里剔除（标题另有规则）。
 _NARRATIVE = re.compile(
-    r"^(?:想知道|感兴趣的话|感兴趣的可以|值得一读|值得读|这篇内容值得|"
-    r"如果你|我试用了|我试了|作者称|作者表示|原文还|读这篇)"
+    r"^(?:想知道|感兴趣的话|感兴趣的可以|值得一读|值得读|值得一看|推荐阅读|这篇内容值得|"
+    r"如果你|我试用了|我试了|作者称|作者表示|原文还|读这篇|不妨看看)"
 )
 
 # 改写：去掉信源自带的转发腔调，让标题直接说事（只动语气词，不动事实）
@@ -270,8 +272,8 @@ def score_sentence(sentence, index):
         score += 10                               # 价格/折扣
     if _DEADLINE.search(sentence):
         score += 8                                # 期限
-    if re.search(r"(?:免费|赠送|折扣|优惠|领取|注册|申请|名额|限量|资格)", sentence):
-        score += 6                                # 领取动作与条件
+    if re.search(r"(?:免费|赠送|折扣|优惠|领取|注册|申请|名额|限量|资格|兑换|报名|认证|邀请码)", sentence):
+        score += 6                                # 领取动作与门槛（怎么领）
     if re.search(r"(?:因为|由于|原因是|起因|之所以|受.{0,12}影响|得益于|为应对)", sentence):
         score += 6                                # 前因
     if re.search(r"(?:官方|announced|确认|回应|宣布|表示|称)", sentence, re.I):
@@ -367,6 +369,44 @@ def format_published(item):
 
 # ---------------------------------------------------------------- 组装消息
 
+def short_label(label):
+    """速览行标签：只留一段、且不超过 LABEL_LIMIT 字。
+
+    实测线上消息尾部是「via Hacker News · 24h最热 · 热议参考」——
+    两个标签挤在一起，读者看不出它们说明什么，属于纯噪声。
+    """
+    text = re.sub(r"\s+", " ", label or "").strip()
+    if not text:
+        return ""
+    first = re.split(r"[·|/／,，]", text)[0].strip()
+    return first if len(first) <= LABEL_LIMIT else ""
+
+
+def build_brief(reason, avoid="", limit=BRIEF_LIMIT):
+    """从正文里取一句「这是什么」，给内容太少的消息补位。
+
+    跳过与标题/细节行重复的句子（否则又是同一句话说两遍）。
+    """
+    sentences = split_sentences(reason)
+    if not sentences:
+        return ""
+    key = _squeeze(avoid)
+    for sentence in sentences:
+        squeezed = _squeeze(sentence)
+        if squeezed and squeezed not in key:
+            return _trim_at_boundary(sentence, limit, prefer_sentence=True)
+    return _trim_at_boundary(sentences[0], limit, prefer_sentence=True)
+
+
+def content_line_count(message):
+    """渲染后的内容行数（去掉标题行与速览行）。
+
+    run.py 的正文闸门用它判断「这条消息除了标题还有东西可读吗」。
+    """
+    lines = [line for line in (message or "").splitlines() if line.strip()]
+    return max(len(lines) - 2, 0)
+
+
 def build_instant_message(item, kind="welfare", budget=DEFAULT_BUDGET):
     """组装一条即时消息。
 
@@ -378,7 +418,7 @@ def build_instant_message(item, kind="welfare", budget=DEFAULT_BUDGET):
     title = build_title(item)
     url = html.escape(_get(item, "url") or "", quote=True)
     src = _get(item, "source") or "原文链接"
-    tier_label = _get(item, "tier_label")
+    tier_label = short_label(_get(item, "tier_label"))
     facts_only = _get(item, "layout") == "facts_only"
 
     # 预留速览行开销，其余给细节行与摘要
@@ -420,16 +460,31 @@ def build_instant_message(item, kind="welfare", budget=DEFAULT_BUDGET):
             break
         detail_lines.append(line)
 
+    # 3) 简介行：facts_only 体裁不倒正文，如果只抽到 0~1 条细节行，
+    #    消息就只剩标题 + 一行数字（实测「优惠价出一个香港 CSL esim」就是这样）。
+    #    这里补一句「这是什么」，让读者知道标题在说什么。
+    brief_line = ""
+    if facts_only and len(detail_lines) <= 1 and reason and body_budget >= BRIEF_LIMIT // 2:
+        brief = build_brief(reason, " ".join([title] + [v for _, v in fresh]))
+        if brief:
+            brief_line = f"▎简介：{highlight(brief)}"
+
     lines = [f"{header} <b>{esc(title)}</b>"]
+    if brief_line:
+        lines.append(brief_line)
     lines.extend(detail_lines)
     if summary:
         lines.append(f"<blockquote>{highlight(summary)}</blockquote>")
 
-    # 3) 速览行：只放还没出现过的信息
-    #    比对范围包含标题——例：标题写「60 元」、细节行给「¥59.20（到手价）」时，
+    # 4) 速览行：只放还没出现过的信息
+    #    比对范围包含标题与简介行——例：标题写「60 元」、细节行给「¥59.20（到手价）」时，
     #    速览行不该再把金额列第三遍
     shown = _squeeze(
-        " ".join(detail_lines).replace("<b>", "").replace("</b>", "") + " " + title
+        " ".join(detail_lines + ([brief_line] if brief_line else []))
+        .replace("<b>", "")
+        .replace("</b>", "")
+        + " "
+        + title
     )
     meta = []
     deadline = next((v for label, v in facts if label == "截止"), "")

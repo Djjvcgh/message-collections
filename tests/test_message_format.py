@@ -5,6 +5,7 @@ from pusher.notify_telegram import (
     build_instant_message,
     build_summary,
     build_title,
+    content_line_count,
     drop_repeated,
     format_published,
     highlight,
@@ -271,3 +272,62 @@ def test_short_summary_is_not_padded():
     item = make(title="折扣券", summary="三折券 40r。")
     msg = build_instant_message(item)
     assert len(msg) < 120
+
+
+# ---------------------------------------------------------------- 正文保障（2026-10-05）
+
+def test_facts_only_gets_brief_line_when_details_are_thin():
+    """实测：V2EX「优惠价出一个香港 CSL esim」只抽到一行价格，整条消息没有内容。"""
+    item = make(
+        title="优惠价出一个香港 CSL esim",
+        source="V2EX 优惠信息",
+        layout="facts_only",
+        summary=(
+            "香港 CSL esim, 15GB 中澳台漫游，香港 25GB，14 元/年保号，"
+            "原价 130，现价 120 联系绿泡泡 abc"
+        ),
+    )
+    msg = build_instant_message(item)
+    assert "▎简介：" in msg
+    assert "香港 CSL esim" in msg
+    assert content_line_count(msg) >= 1
+
+
+def test_facts_only_skips_brief_when_details_are_enough():
+    """细节行够多时不再补简介，保持「只给要点」的体裁。"""
+    item = make(
+        title="AdGuard 终身订阅优惠",
+        layout="facts_only",
+        summary="折扣码：LIFETIMEO 最终到手价 ￥59.20，截止 10月15日，库存有限",
+    )
+    msg = build_instant_message(item)
+    assert "<blockquote>" not in msg
+    assert "▎简介：" not in msg
+
+
+def test_content_line_count_counts_only_body_lines():
+    assert content_line_count("🎁 [福利] <b>标题</b>\nvia 来源") == 0
+    assert content_line_count("🎁 [福利] <b>标题</b>\n▎价格：<b>14 元</b>\nvia 来源") == 1
+    assert (
+        content_line_count(
+            "🎁 [福利] <b>标题</b>\n▎价格：1 元\n<blockquote>摘要</blockquote>\nvia 来源"
+        )
+        == 2
+    )
+
+
+def test_short_label_filters_composite_noise():
+    """实测尾部是「via Hacker News · 24h最热 · 热议参考」，两个标签挤在一起是噪声。"""
+    from pusher.notify_telegram import short_label
+
+    assert short_label("热议参考") == "热议参考"
+    assert short_label("24h最热 · 热议参考") == "24h最热"
+    assert short_label("这是一个特别特别长的标签") == ""
+    assert short_label("") == ""
+
+
+def test_long_composite_label_is_dropped_from_footer():
+    item = make(title="某云赠送 3 个月免费服务器", summary="注册即可领取。", tier_label="24h最热 · 热议参考")
+    msg = build_instant_message(item)
+    assert "24h最热" in msg
+    assert "热议参考" not in msg
