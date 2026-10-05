@@ -1,0 +1,97 @@
+{
+  "_comment": "真实噪音语料：每一条都必须被判为「不推」。全部来自 2026-10-05 线上推送记录与信源探测。加一条新噪音时，往这里追加即可自动回归。",
+  "items": [
+    {
+      "why": "线上真实推送（radar/HN）：福利被取消的资讯，命中 免费使用",
+      "title": "Gemini 将结束 Flash 和 Pro 模型的免费使用",
+      "title_en": "Gemini is ending free access to Flash and Pro models",
+      "summary": "Google 宣布 Gemini 的 Flash 与 Pro 模型将结束免费使用，改为按量计费。",
+      "url": "https://news.ycombinator.com/item?id=1",
+      "source_id": "radar"
+    },
+    {
+      "why": "线上真实推送（radar/juejin）：行业资讯，命中宽词 学生",
+      "title": "我让AI教学生写前端，三天后课堂变了——Web教育者的集体反思",
+      "url": "https://juejin.cn/post/1",
+      "source_id": "radar"
+    },
+    {
+      "why": "信源探测实测：MIT 报告的英文标题让 student 命中（弱词不再匹配 title_en）",
+      "title": "MIT报告发现，AI正在侵蚀答疑时间、学习小组以及师生之间的信任",
+      "title_en": "AI is eroding office hours, study groups and the trust between faculty and students, MIT report finds",
+      "summary": "MIT 专家委员会报告警告：教授甚至考虑用 AI agents 替代学生做 research assistants。",
+      "url": "https://the-decoder.com/ai-is-eroding-office-hours/",
+      "source_id": "radar"
+    },
+    {
+      "why": "线上真实推送（V2EX 优惠信息）：二手转卖，不是福利",
+      "title": "优惠价出一个香港 CSL esim",
+      "summary": "香港 CSL esim, 15GB 中澳台漫游，香港 25GB，14 元/年保号，原价 130，现价 120 联系绿泡泡 QWRhbXR4Mjg=",
+      "url": "https://www.v2ex.com/t/1246420",
+      "source_id": "v2ex-deals"
+    },
+    {
+      "why": "V2EX 免费赠送节点里的索要帖（求人送，不是发福利）",
+      "title": "有大哥华住会铂金能送个金会员吗？",
+      "summary": "想蹭个金会员，有偿也行。",
+      "url": "https://www.v2ex.com/t/2",
+      "source_id": "v2ex-free"
+    },
+    {
+      "why": "NodeSeek 福利版实测：二手交易帖",
+      "title": "【出】懒猫云 US-Premium Basic 三网精品1折",
+      "summary": "26 元出，联系 tg @someone",
+      "url": "https://www.nodeseek.com/post-1",
+      "source_id": "nodeseek-free"
+    },
+    {
+      "why": "Telegram 免费频道实测：加密空投刷屏，与读者能领的福利无关",
+      "title": "🎉 $2000 ETH ( 2 Winners ) 🎉",
+      "summary": "Crypto giveaway! Join now and claim your reward. Connect wallet to participate.",
+      "url": "https://t.me/freebie/1",
+      "source_id": "tg-freebie"
+    },
+    {
+      "why": "Telegram 免费频道实测：活动已结束的通告",
+      "title": "Giveaway for $500 USDT Ended!",
+      "summary": "This giveaway has ended, thanks for participating.",
+      "url": "https://t.me/freebie/2",
+      "source_id": "tg-freebie"
+    },
+    {
+      "why": "历史误报：评测文，「免费」已从词表移除",
+      "title": "我试用了 Gemini 免费的新电影制作工具；好莱坞完全没什么好担心的",
+      "summary": "想知道 Google Vids 的免费 AI 视频生成到底多好笑，读这篇就够了。",
+      "url": "https://www.androidpolice.com/1",
+      "source_id": "radar"
+    },
+    {
+      "why": "历史误报：开源项目的说明，不是发给读者的福利",
+      "title": "Meta 开源代码，让你打造 Muse AI 小硬件",
+      "summary": "项目已开源，代码可自由下载使用。",
+      "url": "https://example.com/muse",
+      "source_id": "radar"
+    },
+    {
+      "why": "历史误报：厂商口径的行业新闻（订阅介绍含 credits）",
+      "title": "别再猜哪个 AI 最强了：不到 100 美元就能用上 GPT 和 Claude",
+      "summary": "该订阅每月含 400 万 credits，适合重度用户。",
+      "url": "https://example.com/sub",
+      "source_id": "radar"
+    },
+    {
+      "why": "信源探测实测：什么值得买社区文，正文里的 折扣 是楼市分析不是优惠",
+      "title": "工抵房折扣的真相：越过20%红线，越便宜的房子越站不住脚，交定金前先过这五道检查",
+      "summary": "开发商以折扣名义降价，但房子的实际品质与产权状况需要提前核实。",
+      "url": "https://post.smzdm.com/p/1",
+      "source_id": "smzdm-post"
+    },
+    {
+      "why": "已经领完的赠送帖（V2EX 免费赠送节点常见）",
+      "title": "[已送出] 内网云兑换券 5 张先到先得",
+      "summary": "已送完，感谢各位，下次再来。",
+      "url": "https://www.v2ex.com/t/3",
+      "source_id": "v2ex-free"
+    }
+  ]
+}

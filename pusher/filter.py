@@ -18,12 +18,14 @@
 视为整篇正文，不参与匹配。**弱词不匹配 title_en**：实测英文标题里的
 students / discount 会把 AI 行业新闻整条捞进来。
 """
+import copy
 import re
 
 from .facts import (
     has_claim_signal,
     has_offer_signal,
     has_window_signal,
+    is_finished,
     mask_negated,
 )
 from .state import title_key
@@ -96,8 +98,14 @@ def _short_reason(item, max_reason_chars):
 
 
 def text_fields(item, max_reason_chars=MAX_REASON_CHARS):
-    """标题 + 短摘要：摘要过长（整篇正文）时丢弃，避免误报。"""
-    return mask_benign(head_fields(item)) + [_short_reason(item, max_reason_chars)]
+    """标题 + 短摘要：摘要过长（整篇正文）时丢弃，避免误报。
+
+    注意 mask_benign 必须把摘要一起过一遍：此前只屏蔽了标题，
+    摘要里的「This giveaway has ended」照样能让 giveaway 命中——
+    实测噪音语料里那条「活动已结束」的通告就是这么漏进来的。
+    """
+    reason = _short_reason(item, max_reason_chars)
+    return mask_benign(head_fields(item) + [reason])
 
 
 def weak_fields(item, max_reason_chars=MAX_REASON_CHARS):
@@ -107,7 +115,31 @@ def weak_fields(item, max_reason_chars=MAX_REASON_CHARS):
     students」让一条 AI 行业新闻命中了英文弱词 student。
     """
     parts = [_get(item, "title"), " ".join(_get(item, "signals", []) or [])]
-    return mask_benign(parts) + [_short_reason(item, max_reason_chars)]
+    return mask_benign(parts + [_short_reason(item, max_reason_chars)])
+
+
+def matching_item(item, max_reason_chars=MAX_REASON_CHARS):
+    """判定证据用的条目视图：摘要按同样的门槛处理后再交给证据正则。
+
+    `match_summary=False`（radar 那类资讯源的摘要是整篇文章）或摘要过长时，
+    摘要不参与任何判定——否则弱词共现、派生限时这些**证据类规则**
+    会被整篇文章蹭中，绕过正文门槛。实测就是这条漏洞让一条
+    `match_summary=False` 的资讯条命中「免费领取」。
+    """
+    summary = _short_reason(item, max_reason_chars)
+    if isinstance(item, dict):
+        view = dict(item)
+        view["summary"] = summary
+        return view
+    try:
+        view = copy.copy(item)
+    except TypeError:      # 不可拷贝的对象就别折腾，按原样判定
+        return item
+    try:
+        setattr(view, "summary", summary)
+    except AttributeError:
+        return item
+    return view
 
 
 def text_blob(parts):
@@ -179,27 +211,42 @@ class WelfareFilter:
         spaced = text_blob_spaced(parts)
         return any(w in blob or w in spaced for w in self.exclude)
 
-    def classify(self, item):
-        """返回 'welfare' / 'opportunity'，不命中返回 None。"""
+    def explain(self, item):
+        """返回 (kind, reason)：kind 为分类结果，reason 供日志/报告归因。
+
+        判定只有这一处实现，``classify`` 与 ``--report`` 共用，
+        不会出现「报告说该推、实际没推」这种两套逻辑打架的情况。
+        """
         parts = text_fields(item, self.max_reason_chars)
         if self._excluded(parts):
-            return None
+            return None, "excluded"
+        # 证据类判定统一走「摘要已按门槛裁剪」的视图，避免整篇文章蹭中
+        evidence = matching_item(item, self.max_reason_chars)
+        # 公告已作废（领完/送完/过期）：整条丢弃，而不是只抹掉某个词
+        if is_finished(evidence):
+            return None, "finished"
         if self.welfare.matches(parts):
-            return KIND_WELFARE
+            return KIND_WELFARE, "welfare-strong"
         weak_parts = weak_fields(item, self.max_reason_chars)
-        if self.weak_welfare and self.weak_welfare.matches(weak_parts):
-            # 宽词必须与硬福利证据共现，否则就是行业资讯
-            if has_offer_signal(item):
-                return KIND_WELFARE
+        weak_hit = bool(self.weak_welfare) and self.weak_welfare.matches(weak_parts)
+        has_offer = has_offer_signal(evidence)
+        if weak_hit and has_offer:
+            return KIND_WELFARE, "welfare-weak"
         if self.opportunity.matches(parts):
-            return KIND_OPPORTUNITY
+            return KIND_OPPORTUNITY, "opportunity-strong"
         if self.weak_opportunity and self.weak_opportunity.matches(weak_parts):
-            if has_offer_signal(item) or has_claim_signal(item):
-                return KIND_OPPORTUNITY
+            if has_offer or has_claim_signal(evidence):
+                return KIND_OPPORTUNITY, "opportunity-weak"
         # 派生限时：既拿得到东西、又有窗口（截止/名额/先到先得），就是「错过没了」
-        if has_offer_signal(item) and has_window_signal(item):
-            return KIND_OPPORTUNITY
-        return None
+        if has_offer and has_window_signal(evidence):
+            return KIND_OPPORTUNITY, "opportunity-derived"
+        if weak_hit:
+            return None, "weak-no-action"
+        return None, "no-keyword"
+
+    def classify(self, item):
+        """返回 'welfare' / 'opportunity'，不命中返回 None。"""
+        return self.explain(item)[0]
 
     def match(self, item):
         return self.classify(item) is not None

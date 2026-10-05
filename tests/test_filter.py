@@ -98,23 +98,36 @@ def test_summary_matched_only_when_short():
 
 def test_match_summary_can_be_disabled_per_item():
     """资讯聚合类信源的摘要是整篇文章，可按条目关闭摘要匹配。"""
-    wf = WelfareFilter(["免费"])
+    wf = WelfareFilter(["免费领取"])
+    summary = "文中提到该平台可免费领取额度，先到先得"
     noisy = as_item(
         {
             "title": "OpenAI 发布新 agent 平台",
-            "summary": "文中提到该平台免费开放给企业",
+            "summary": summary,
             "match_summary": False,
         }
     )
     assert not wf.match(noisy)
     # 同一段摘要在允许匹配时（RSS 社区源默认行为）仍可兜底
-    loose = as_item(
-        {
-            "title": "OpenAI 发布新 agent 平台",
-            "summary": "文中提到该平台免费开放给企业",
-        }
-    )
+    loose = as_item({"title": "OpenAI 发布新 agent 平台", "summary": summary})
     assert wf.match(loose)
+
+
+def test_summary_is_masked_too():
+    """摘要也必须过屏蔽层：实测「This giveaway has ended」就是这么漏进来的。"""
+    wf = WelfareFilter(["免费", "giveaway"])
+    assert not wf.match(
+        as_item(
+            {
+                "title": "活动通告",
+                "summary": "This giveaway has ended, thanks for participating.",
+            }
+        )
+    )
+    # 「免费开放」是已知的「看着像福利其实不是」，摘要里同样要屏蔽
+    assert not wf.match(
+        as_item({"title": "Meta 新硬件", "summary": "该平台免费开放给所有开发者使用"})
+    )
 
 
 def test_benign_phrases_do_not_count_as_welfare():

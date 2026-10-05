@@ -1,0 +1,85 @@
+{
+  "_comment": "真实福利语料：每一条都必须命中，且 kind 与 expect 一致。全部来自 2026-10-05 信源探测与既有线上推送。加一条真福利时往这里追加即可自动回归。",
+  "items": [
+    {
+      "why": "V2EX 优惠信息实测：带兑换券码的真福利",
+      "title": "[免费赠送] 内网云 2026 国庆活动余额兑换券，附实名认证说明",
+      "summary": "借国庆发一批余额兑换券，先到先得。兑换券码： NWY-CIYUM-4UYZD-40694 兑换方式：进入平台仪表盘兑换。",
+      "url": "https://www.v2ex.com/t/1246092",
+      "source_id": "v2ex-free",
+      "expect": "welfare"
+    },
+    {
+      "why": "V2EX 免费赠送节点实测：会员赠送帖",
+      "title": "送网易云会员啦～",
+      "summary": "随机天数，有需自取，先到先得，领取后回复一下即可。",
+      "url": "https://www.v2ex.com/t/4",
+      "source_id": "v2ex-free",
+      "expect": "welfare"
+    },
+    {
+      "why": "V2EX 免费赠送节点实测：邀请送额度（数字把「送额度」隔开了）",
+      "title": "codex 邀请送 1000 额度",
+      "summary": "每邀请一人可获 1,000 个额度，名额有限，先到先得。",
+      "url": "https://www.v2ex.com/t/5",
+      "source_id": "v2ex-free",
+      "expect": "welfare"
+    },
+    {
+      "why": "Reddit 免费版块实测：应用终身赠送",
+      "title": "[iOS] [Lifetime Giveaway] Daylivia: your everyday self care companion",
+      "summary": "Free lifetime unlock for the first 1000 users with promo code DAYLIVIA1000.",
+      "url": "https://www.reddit.com/r/AppHookup/comments/1/",
+      "source_id": "reddit-freebies",
+      "expect": "welfare"
+    },
+    {
+      "why": "Reddit 免费版块实测：promo code 领电影票",
+      "title": "2x Free Movie Tickets for BEWARE BOIUNA with promo code ATOMBEWARE",
+      "summary": "Use promo code ATOMBEWARE at checkout to get two free tickets.",
+      "url": "https://www.reddit.com/r/freebies/comments/1/",
+      "source_id": "reddit-freebies",
+      "expect": "welfare"
+    },
+    {
+      "why": "既有线上推送：折扣码单独成行",
+      "title": "AdGuard Family Plan 终身订阅优惠,9 设备永久授权家庭版 / 60 元",
+      "summary": "原价 ￥74.00，折扣码： LIFETIMEO，最终到手价： ￥59.20，截止 10月15日。",
+      "url": "https://www.v2ex.com/t/1246054",
+      "source_id": "v2ex-deals",
+      "expect": "welfare"
+    },
+    {
+      "why": "既有测试语料：发放免费额度",
+      "title": "某站发放免费额度，先到先得",
+      "summary": "注册即可领取，每人限一份。",
+      "url": "https://example.com/credits",
+      "source_id": "nodeseek-free",
+      "expect": "welfare"
+    },
+    {
+      "why": "既有测试语料：注册送额度的限时窗口",
+      "title": "某某云开放注册，新用户注册即送 100 元额度，限量 500 个名额",
+      "summary": "开放申请截止 10月15日，需实名认证，先到先得。",
+      "url": "https://example.com/signup",
+      "source_id": "nodeseek-free",
+      "expect": "opportunity"
+    },
+    {
+      "why": "宽词 + 硬证据：学生认证领会员（宽词必须共现硬信号）",
+      "title": "学生认证可免费领取 1 年会员",
+      "summary": "教育邮箱认证后即可领取，活动截止 10月31日。",
+      "url": "https://example.com/edu",
+      "source_id": "52pojie",
+      "expect": "welfare"
+    },
+    {
+      "why": "反例保护：带截止时间的真福利不能被否定规则误伤",
+      "title": "限时免费领取 100 元额度，月底结束",
+      "summary": "新用户注册后可领，额度可用于云服务器。",
+      "url": "https://example.com/limited",
+      "source_id": "nodeseek-free",
+      "expect": "welfare"
+    }
+  ]
+}
